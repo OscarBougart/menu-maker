@@ -11,9 +11,10 @@ import React from 'react';
  * All text is contentEditable — click any field to tweak it before exporting.
  */
 
-const BOOKLET_ITEMS_PER_PAGE = 5; // budget before breaking to a new interior page
+const BOOKLET_ITEMS_PER_PAGE = 5;
+const BOOKLET_H_ITEMS_PER_PAGE = 4; // landscape pages are shorter vertically
 
-export default function MenuTemplate({ menu, format = 'a5', onEdit }) {
+export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit }) {
   if (!menu) return null;
 
   const spec = menu.render_spec || {};
@@ -86,27 +87,116 @@ export default function MenuTemplate({ menu, format = 'a5', onEdit }) {
 
   const sections = menu.sections || [];
 
-  /* ── A5: one dense page ───────────────────────────────────── */
+  const SectionList = () => (
+    <div className="m-columns" style={{ columnCount: columns, columnGap: '32px' }}>
+      {sections.map((section, si) => (
+        <div key={si} style={{ breakInside: 'avoid' }}>
+          <SectionTitle section={section} si={si} />
+          {(section.cocktails || []).map((c, ci) => (
+            <Cocktail key={ci} c={c} si={si} ci={ci} />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+
+  /* ── A5 PORTRAIT: one dense page ─────────────────────────── */
   if (format === 'a5') {
     return (
       <div className="menu-sheet sheet-a5" id="menu-sheet" style={styleVars}>
         <div className="menu-pad">
           <Cover />
-          {sections.map((section, si) => (
-            <div key={si}>
-              <SectionTitle section={section} si={si} />
-              {(section.cocktails || []).map((c, ci) => (
-                <Cocktail key={ci} c={c} si={si} ci={ci} />
-              ))}
-            </div>
-          ))}
+          <SectionList />
           <Footer />
         </div>
       </div>
     );
   }
 
-  /* ── BOOKLET: cover page + paginated interior pages ───────── */
+  /* ── A5 LANDSCAPE: two-column — cover left, drinks right ─── */
+  if (format === 'a5h') {
+    return (
+      <div className="menu-sheet sheet-a5h" id="menu-sheet" style={styleVars}>
+        <div className="menu-pad-h">
+          <div className="menu-col-cover">
+            <Cover />
+            <Footer />
+          </div>
+          <div className="menu-col-divider" />
+          <div className="menu-col-drinks">
+            <SectionList />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* ── BOOKLET LANDSCAPE: cover page + paginated interior pages */
+  if (format === 'bookleth') {
+    const hPages = [];
+    hPages.push({ type: 'cover' });
+
+    let hCurrent = { type: 'content', blocks: [] };
+    let hCount = 0;
+    const pushHPage = () => {
+      if (hCurrent.blocks.length) hPages.push(hCurrent);
+      hCurrent = { type: 'content', blocks: [] };
+      hCount = 0;
+    };
+
+    sections.forEach((section, si) => {
+      if (hCount > 0 && hCount >= BOOKLET_H_ITEMS_PER_PAGE - 1) pushHPage();
+      hCurrent.blocks.push({ kind: 'section', section, si });
+      (section.cocktails || []).forEach((c, ci) => {
+        if (hCount >= BOOKLET_H_ITEMS_PER_PAGE) pushHPage();
+        hCurrent.blocks.push({ kind: 'cocktail', c, si, ci });
+        hCount++;
+      });
+    });
+    pushHPage();
+    hPages.push({ type: 'footer' });
+
+    return (
+      <div className="booklet" id="menu-sheet" style={styleVars}>
+        {hPages.map((page, pi) => {
+          if (page.type === 'cover') {
+            return (
+              <div className="menu-sheet sheet-a5h page-cover-h" key={pi}>
+                <div className="menu-pad-h menu-pad-h-cover">
+                  <Cover />
+                </div>
+              </div>
+            );
+          }
+          if (page.type === 'footer') {
+            return (
+              <div className="menu-sheet sheet-a5h page-footer-h" key={pi}>
+                <div className="menu-pad-h menu-pad-h-cover">
+                  <div className="m-divider"><span className="m-orn">✦</span></div>
+                  <Footer />
+                </div>
+              </div>
+            );
+          }
+          return (
+            <div className="menu-sheet sheet-a5h" key={pi}>
+              <div className="menu-pad">
+                <div className="m-columns" style={{ columnCount: columns, columnGap: '32px' }}>
+                  {page.blocks.map((b, bi) =>
+                    b.kind === 'section'
+                      ? <div key={bi} style={{ breakInside: 'avoid' }}><SectionTitle section={b.section} si={b.si} /></div>
+                      : <div key={bi} style={{ breakInside: 'avoid' }}><Cocktail c={b.c} si={b.si} ci={b.ci} /></div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  /* ── BOOKLET PORTRAIT: cover page + paginated interior pages ─ */
   // Build a flat list of render blocks, then pack into pages.
   const pages = [];
   pages.push({ type: 'cover' });
@@ -155,11 +245,13 @@ export default function MenuTemplate({ menu, format = 'a5', onEdit }) {
         return (
           <div className="menu-sheet sheet-booklet" key={pi}>
             <div className="menu-pad">
-              {page.blocks.map((b, bi) =>
-                b.kind === 'section'
-                  ? <SectionTitle key={bi} section={b.section} si={b.si} />
-                  : <Cocktail key={bi} c={b.c} si={b.si} ci={b.ci} />
-              )}
+              <div className="m-columns" style={{ columnCount: columns, columnGap: '32px' }}>
+                {page.blocks.map((b, bi) =>
+                  b.kind === 'section'
+                    ? <div key={bi} style={{ breakInside: 'avoid' }}><SectionTitle section={b.section} si={b.si} /></div>
+                    : <div key={bi} style={{ breakInside: 'avoid' }}><Cocktail c={b.c} si={b.si} ci={b.ci} /></div>
+                )}
+              </div>
             </div>
           </div>
         );

@@ -11,13 +11,14 @@ export default function App() {
   const [menu, setMenu] = useState(null);
   const [status, setStatus] = useState('Ready');
   const [busy, setBusy] = useState(false);
-  const [format, setFormat] = useState('a5'); // 'a5' | 'booklet'
+  const [format, setFormat] = useState('a5'); // 'a5' | 'a5h' | 'booklet' | 'bookleth'
 
   // sources for the generate dropdown
   const [sources, setSources] = useState({ master: false, templates: [] });
   const [selectedSource, setSelectedSource] = useState('master');
   const [masterInfo, setMasterInfo] = useState(null); // master contents for the panel
   const [savedMenus, setSavedMenus] = useState([]);
+  const [columns, setColumns] = useState(1);
   const fileRef = useRef(null);
 
   const refreshSources = async () => {
@@ -135,7 +136,7 @@ export default function App() {
     if (!menu) return;
     await fetch('/api/save-menu', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: menu.bar_name, menu }),
+      body: JSON.stringify({ name: menu.bar_name, menu: { ...menu, columns } }),
     });
     setStatus('Saved to /menus');
     refreshMenus();
@@ -146,6 +147,7 @@ export default function App() {
       const data = await (await fetch('/api/load-menu/' + key)).json();
       if (data.error) throw new Error(data.error);
       setMenu(data);
+      setColumns(data.columns || 1);
       setStatus('Loaded · ' + (data.bar_name || key));
     } catch (err) { setStatus('Error: ' + err.message); }
   };
@@ -250,6 +252,14 @@ export default function App() {
             placeholder="Your drinks (optional) — Oaxacan Old Fashioned, Black Manhattan…"
             value={drinks} onChange={(e) => setDrinks(e.target.value)}
           />
+          <div className="col-picker">
+            <span className="src-label" style={{ marginBottom: 0 }}>Columns</span>
+            <div className="col-toggle">
+              {[1, 2, 3].map((n) => (
+                <button key={n} className={'col-btn' + (columns === n ? ' active' : '')} onClick={() => setColumns(n)}>{n}</button>
+              ))}
+            </div>
+          </div>
           <button className="btn btn-blood" onClick={generate} disabled={busy}>Compose Menu</button>
         </div>
         {/* SAVED MENUS */}
@@ -286,17 +296,19 @@ export default function App() {
 
       <main className="canvas">
         <div className="canvas-bar">
-          <span className="canvas-label">Menu Preview · {format === 'a5' ? 'A5 Sheet' : 'Booklet'}</span>
+          <span className="canvas-label">Menu Preview · {{ a5: 'A5 Portrait', a5h: 'A5 Landscape', booklet: 'Booklet Portrait', bookleth: 'Booklet Landscape' }[format]}</span>
           <div className="format-toggle">
-            <button className={'fmt-btn' + (format === 'a5' ? ' active' : '')} onClick={() => setFormat('a5')}>A5 Sheet</button>
+            <button className={'fmt-btn' + (format === 'a5' ? ' active' : '')} onClick={() => setFormat('a5')}>A5</button>
+            <button className={'fmt-btn' + (format === 'a5h' ? ' active' : '')} onClick={() => setFormat('a5h')}>A5 ↔</button>
             <button className={'fmt-btn' + (format === 'booklet' ? ' active' : '')} onClick={() => setFormat('booklet')}>Booklet</button>
+            <button className={'fmt-btn' + (format === 'bookleth' ? ' active' : '')} onClick={() => setFormat('bookleth')}>Booklet ↔</button>
           </div>
           <span className="status">{busy ? '\u25CC ' : ''}{status}</span>
         </div>
 
         {menu ? (
           <>
-            <MenuTemplate menu={menu} format={format} onEdit={editMenu} />
+            <MenuTemplate menu={menu} format={format} columns={columns} onEdit={editMenu} />
             <div className="edit-hint">Click any text on the menu to edit it before exporting.</div>
             <div className="export-bar">
               <button className="export-btn" onClick={exportPDF}>Export PDF</button>

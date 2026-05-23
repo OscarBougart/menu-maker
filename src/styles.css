@@ -172,15 +172,48 @@ textarea::placeholder, input::placeholder { color: var(--bone-faint); font-style
   box-shadow: 0 50px 140px rgba(0,0,0,0.8);
   animation: reveal 0.5s ease both;
 }
-/* A5 ratio 148:210 → scaled preview */
+/* A5 portrait ratio 148:210 → scaled preview */
 .sheet-a5 { width: 460px; min-height: 653px; }
-/* Booklet pages: same A5 page size, stacked vertically in preview */
+/* A5 landscape ratio 210:148 → flipped */
+.sheet-a5h { width: 653px; min-height: 460px; }
+
+/* Booklet pages: stacked vertically in preview */
 .booklet { display: flex; flex-direction: column; gap: 22px; align-items: center; }
 .sheet-booklet { width: 460px; min-height: 653px; }
 .page-cover .menu-pad-cover, .page-footer .menu-pad-cover {
   display: flex; flex-direction: column; justify-content: center;
   min-height: 653px; text-align: center;
 }
+.page-cover-h .menu-pad-h-cover, .page-footer-h .menu-pad-h-cover {
+  display: flex; flex-direction: column; justify-content: center;
+  align-items: center; min-height: 460px; text-align: center; padding: 40px 60px;
+}
+
+/* ── LANDSCAPE TWO-COLUMN LAYOUT ── */
+.menu-pad-h {
+  display: grid;
+  grid-template-columns: 1fr 1px 1.4fr;
+  min-height: 460px;
+}
+.menu-col-cover {
+  padding: 44px 32px 44px 46px;
+  display: flex; flex-direction: column; justify-content: center;
+}
+.menu-col-divider {
+  background: linear-gradient(to bottom, transparent, var(--m-accent, #9a7b3f), transparent);
+  opacity: 0.4;
+  margin: 32px 0;
+}
+.menu-col-drinks {
+  padding: 40px 46px 40px 36px;
+  overflow: hidden;
+}
+/* Tighten item spacing in landscape so more fits */
+.sheet-a5h .m-item { margin-bottom: 14px; }
+.sheet-a5h .m-title { font-size: 32px; }
+.sheet-a5h .m-tagline { font-size: 13px; margin-bottom: 18px; }
+.sheet-a5h .m-divider { margin-bottom: 16px; }
+
 .m-title-mini { font-size: 34px; }
 @keyframes reveal { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:translateY(0)} }
 
@@ -246,9 +279,8 @@ textarea::placeholder, input::placeholder { color: var(--bone-faint); font-style
   font-size: 12px; color: var(--m-muted, #9a958c);
 }
 
-/* ── PRINT: A5 page size, each sheet its own page ── */
+/* ── PRINT ── */
 @media print {
-  @page { size: A5; margin: 0; }
   .panel, .canvas-bar, .export-bar, .edit-hint { display: none !important; }
   .app { display: block !important; }
   .canvas { background: #fff !important; padding: 0 !important; min-height: auto !important; }
@@ -260,8 +292,19 @@ textarea::placeholder, input::placeholder { color: var(--bone-faint); font-style
   }
   .menu-sheet:last-child { page-break-after: auto; break-after: auto; }
   .page-cover .menu-pad-cover, .page-footer .menu-pad-cover { min-height: 100vh !important; }
+  .page-cover-h .menu-pad-h-cover, .page-footer-h .menu-pad-h-cover { min-height: 100vh !important; }
   body { background: #fff !important; }
 }
+/* Portrait A5 pages */
+@media print {
+  .sheet-a5, .sheet-booklet { page: portrait-a5; }
+}
+@page portrait-a5 { size: A5 portrait; margin: 0; }
+/* Landscape A5 pages */
+@media print {
+  .sheet-a5h { page: landscape-a5; }
+}
+@page landscape-a5 { size: A5 landscape; margin: 0; }
 
 /* ── SAVED MENUS GRID ── */
 .menu-grid {
@@ -343,6 +386,19 @@ textarea::placeholder, input::placeholder { color: var(--bone-faint); font-style
 }
 .src-select:focus { border-color: var(--brass); }
 .src-select option { background: var(--near-black); color: var(--bone); }
+
+.col-picker { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
+.col-toggle { display: flex; gap: 4px; }
+.col-btn {
+  width: 32px; height: 28px; background: transparent;
+  border: 1px solid var(--line); border-radius: 2px;
+  color: var(--bone-dim); cursor: pointer; font-family: 'Archivo Narrow', sans-serif;
+  font-size: 12px; transition: all 0.18s;
+}
+.col-btn:hover { border-color: var(--brass); color: var(--bone); }
+.col-btn.active { background: rgba(196,160,90,0.12); border-color: var(--brass); color: var(--bone); }
+
+.m-columns { column-fill: balance; }
 
 .format-toggle { display: flex; gap: 4px; }
 .fmt-btn {
