@@ -34,19 +34,23 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit 
     <div className="m-item">
       <div className="m-item-head">
         <span className="m-name" contentEditable suppressContentEditableWarning
+          role="textbox" aria-multiline="false" aria-label="Cocktail name"
           onBlur={(e) => edit(['sections', si, 'cocktails', ci, 'name'], e.target.innerText)}>
           {c.name}
         </span>
         <span className="m-price" contentEditable suppressContentEditableWarning
+          role="textbox" aria-multiline="false" aria-label="Price"
           onBlur={(e) => edit(['sections', si, 'cocktails', ci, 'price'], e.target.innerText.replace(/[£$€]/g, ''))}>
           {c.price}
         </span>
       </div>
       <div className="m-desc" contentEditable suppressContentEditableWarning
+        role="textbox" aria-multiline="true" aria-label="Description"
         onBlur={(e) => edit(['sections', si, 'cocktails', ci, 'description'], e.target.innerText)}>
         {c.description}
       </div>
       <div className="m-ing" contentEditable suppressContentEditableWarning
+        role="textbox" aria-multiline="true" aria-label="Ingredients"
         onBlur={(e) => edit(['sections', si, 'cocktails', ci, 'ingredients'], e.target.innerText)}>
         {c.ingredients}
       </div>
@@ -55,6 +59,7 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit 
 
   const SectionTitle = ({ section, si }) => (
     <div className="m-section" contentEditable suppressContentEditableWarning
+      role="textbox" aria-multiline="false" aria-label="Section title"
       onBlur={(e) => edit(['sections', si, 'title'], e.target.innerText)}>
       {section.title}
     </div>
@@ -64,10 +69,12 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit 
     <>
       <div className="m-kicker">Cocktails</div>
       <h2 className={'m-title' + (mini ? ' m-title-mini' : '')} contentEditable suppressContentEditableWarning
+        aria-label="Bar name"
         onBlur={(e) => edit(['bar_name'], e.target.innerText)}>
         {menu.bar_name}
       </h2>
       <div className="m-tagline" contentEditable suppressContentEditableWarning
+        role="textbox" aria-multiline="true" aria-label="Tagline"
         onBlur={(e) => edit(['tagline'], e.target.innerText)}>
         {menu.tagline}
       </div>
@@ -79,6 +86,7 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit 
     menu.note ? (
       <div className="m-footer">
         <div className="m-footer-text" contentEditable suppressContentEditableWarning
+          role="textbox" aria-multiline="true" aria-label="Menu note"
           onBlur={(e) => edit(['note'], e.target.innerText)}>
           {menu.note}
         </div>
