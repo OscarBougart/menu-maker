@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import MenuTemplate from './MenuTemplate.jsx';
+import { MENU_DEFAULTS, THEME } from './theme.js';
+
 
 const DISPLAY_FONTS = [
   'Cormorant Garamond', 'Playfair Display', 'EB Garamond',
@@ -28,6 +30,7 @@ export default function App() {
   const [savedMenus, setSavedMenus] = useState([]);
   const [columns, setColumns] = useState(1);
   const [extracting, setExtracting] = useState(false);
+  const [merging, setMerging] = useState(false);
   const [error, setError] = useState(null);
   const [confirmBrain, setConfirmBrain] = useState(false);
   const [printHint, setPrintHint] = useState(false);
@@ -55,6 +58,11 @@ export default function App() {
   };
 
   useEffect(() => { refreshSources(); refreshMenus(); }, []);
+  useEffect(() => {
+    Object.entries(THEME).forEach(([k, v]) =>
+      document.documentElement.style.setProperty(`--${k}`, v)
+    );
+  }, []);
 
   /* ── image loading shared by click, drop, and paste ── */
   const loadImageFile = (file) => {
@@ -103,6 +111,7 @@ export default function App() {
   const saveTemplate = async () => {
     if (!rules) return;
     const name = (refName || rules.aesthetic_summary?.slice(0, 24) || 'untitled').trim();
+    setBusy(true);
     try {
       await fetch('/api/save-rules', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -111,13 +120,14 @@ export default function App() {
       setStatus('Saved "' + name + '" template');
       refreshSources();
     } catch (err) { setError(err.message); setStatus('Error: ' + err.message); }
+    finally { setBusy(false); }
   };
 
   /* add this reference into the master house brain */
   const addToHouseBrain = async () => {
     if (!rules) return;
     const name = (refName || rules.aesthetic_summary?.slice(0, 24) || 'a menu').trim();
-    setBusy(true); setError(null); setStatus('Merging into House Brain…');
+    setBusy(true); setMerging(true); setError(null); setStatus('Merging into House Brain…');
     try {
       const res = await fetch('/api/merge-master', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -129,11 +139,13 @@ export default function App() {
       setStatus(data.seeded ? 'House Brain created' : 'Merged into House Brain — ' + name);
       refreshSources();
     } catch (err) { setError(err.message); setStatus('Error: ' + err.message); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setMerging(false); }
   };
 
   /* 2. Generate from the selected source */
   const generate = async () => {
+    const prevMenu = menu;
+    setMenu(null);
     setBusy(true); setError(null); setStatus('Composing menu…');
     try {
       let sourceRules = rules || {};
@@ -150,7 +162,7 @@ export default function App() {
       if (data.error) throw new Error(data.error);
       setMenu(data);
       setStatus('Menu composed');
-    } catch (err) { setError(err.message); setStatus('Error: ' + err.message); }
+    } catch (err) { setError(err.message); setStatus('Error: ' + err.message); setMenu(prevMenu); }
     finally { setBusy(false); }
   };
 
@@ -170,6 +182,7 @@ export default function App() {
   const exportPDF = () => { setPrintHint(true); window.print(); };
   const saveMenu = async () => {
     if (!menu) return;
+    setBusy(true);
     try {
       await fetch('/api/save-menu', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -178,10 +191,12 @@ export default function App() {
       setStatus('Saved to /menus');
       refreshMenus();
     } catch (err) { setError(err.message); setStatus('Error: ' + err.message); }
+    finally { setBusy(false); }
   };
 
   const loadMenu = async (key) => {
     setDeleteConfirm(null);
+    setBusy(true);
     try {
       const data = await (await fetch('/api/load-menu/' + key)).json();
       if (data.error) throw new Error(data.error);
@@ -189,6 +204,7 @@ export default function App() {
       setColumns(data.columns || 1);
       setStatus('Loaded · ' + (data.bar_name || key));
     } catch (err) { setError(err.message); setStatus('Error: ' + err.message); }
+    finally { setBusy(false); }
   };
 
   const deleteMenu = async (key) => {
@@ -217,7 +233,7 @@ export default function App() {
 
         {/* STEP 1 */}
         <div className="block">
-          <div className="block-title"><span className="step-num">1</span> Reference Menu</div>
+          <div className="block-title"> Reference Menu</div>
           <div
             role="button"
             tabIndex={0}
@@ -259,7 +275,7 @@ export default function App() {
               <input
                 type="text" aria-label="Style name" placeholder="Name this style… e.g. Death & Co"
                 value={refName} onChange={(e) => setRefName(e.target.value)}
-                style={{ marginTop: 10 }}
+                maxLength={40}
               />
               <button className="btn" onClick={saveTemplate} disabled={busy}>Save as Template</button>
               <p className="btn-caption">Saves as a standalone, reusable style.</p>
@@ -274,17 +290,23 @@ export default function App() {
                   </div>
               }
               <p className="btn-caption">Merges into your master library, combining with prior styles.</p>
+              {merging && (
+                <div className="extract-progress" aria-live="polite" aria-label="Merging into House Brain">
+                  <div className="dots"><span className="dot" /><span className="dot" /><span className="dot" /></div>
+                  <span className="extract-label">Merging into House Brain…</span>
+                </div>
+              )}
             </>
           )}
         </div>
 
         {/* HOUSE BRAIN STATUS */}
         {masterInfo && (
-          <div className="block">
+          <div className="block block-secondary">
             <div className="block-title">House Brain</div>
             <div className="rules-card">
               <div className="rules-summary">{masterInfo.aesthetic_summary}</div>
-              <div className="rule-line" style={{ marginBottom: 8 }}>
+              <div className="rule-line rule-line--built">
                 Built from: {(masterInfo.source_menus || []).join(' · ')}
               </div>
               {(masterInfo.palette_library || []).length > 0 && (
@@ -295,7 +317,7 @@ export default function App() {
                 </div>
               )}
               {(masterInfo.divergences || []).length > 0 && (
-                <div className="rule-line" style={{ color: 'var(--brass-bright)' }}>
+                <div className="rule-line rule-line--divergence">
                   {masterInfo.divergences.length} style divergence{masterInfo.divergences.length > 1 ? 's' : ''} tracked as options
                 </div>
               )}
@@ -305,7 +327,7 @@ export default function App() {
 
         {/* STEP 2 */}
         <div className="block">
-          <div className="block-title"><span className="step-num">2</span> Compose</div>
+          <div className="block-title"> Compose</div>
 
           <label className="src-label" htmlFor="source-select">Draw rules from</label>
           <select id="source-select" className="src-select" value={selectedSource} onChange={(e) => setSelectedSource(e.target.value)}>
@@ -317,11 +339,12 @@ export default function App() {
 
           <textarea
             aria-label="Menu brief"
-            rows={4} style={{ marginTop: 10 }}
+            rows={4}
             placeholder="e.g. deep oxblood + bone, brass accents, 6 mezcal drinks, occult apothecary vibe"
             value={prompt} onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); if (!busy) generate(); } }}
           />
+          <div className="kbd-hint">Ctrl+Enter to compose</div>
           <div className="preset-row" role="group" aria-label="Prompt presets">
             {[
               { label: 'Apothecary', value: 'oxblood + bone, brass accents, 8 mezcal cocktails, occult apothecary' },
@@ -333,7 +356,6 @@ export default function App() {
                 onClick={() => setPrompt(prompt === value ? '' : value)} title={value}>{label}</button>
             ))}
           </div>
-          <div style={{ height: 8 }} />
           <textarea
             aria-label="Drink names"
             rows={3}
@@ -341,7 +363,7 @@ export default function App() {
             value={drinks} onChange={(e) => setDrinks(e.target.value)}
           />
           <div className="col-picker">
-            <span className="src-label" style={{ marginBottom: 0 }}>Columns</span>
+            <span className="src-label">Columns</span>
             <div className="col-toggle">
               {[1, 2, 3].map((n) => (
                 <button key={n} aria-pressed={columns === n} className={'col-btn' + (columns === n ? ' active' : '')} onClick={() => setColumns(n)}>{n}</button>
@@ -352,13 +374,13 @@ export default function App() {
         </div>
         {/* SAVED MENUS */}
         {savedMenus.length > 0 && (
-          <div className="block">
+          <div className="block block-secondary">
             <div className="block-title">Saved Menus</div>
             <div className="menu-grid">
               {savedMenus.map((m) => {
-                const bg = m.render_spec?.background || '#0c0d0e';
-                const accent = m.render_spec?.accent || '#9a7b3f';
-                const fg = m.render_spec?.text_primary || '#e8e4db';
+                const bg = m.render_spec?.background || MENU_DEFAULTS.bg;
+                const accent = m.render_spec?.accent || MENU_DEFAULTS.accent;
+                const fg = m.render_spec?.text_primary || MENU_DEFAULTS.text;
                 return (
                   <div
                     key={m.key}
@@ -393,14 +415,13 @@ export default function App() {
 
       <main className="canvas">
         <div className="canvas-bar">
-          <span className="canvas-label">Menu Preview · {{ a5: 'A5 Portrait', a5h: 'A5 Landscape', booklet: 'Booklet Portrait', bookleth: 'Booklet Landscape' }[format]}</span>
+          <span className="canvas-label">Menu Preview</span>
           <div className="format-toggle">
             <button aria-pressed={format === 'a5'} title="A5 Portrait — single dense page" className={'fmt-btn' + (format === 'a5' ? ' active' : '')} onClick={() => setFormat('a5')}>A5</button>
             <button aria-pressed={format === 'a5h'} title="A5 Landscape — cover left, drinks right" className={'fmt-btn' + (format === 'a5h' ? ' active' : '')} onClick={() => setFormat('a5h')}>A5 ↔</button>
             <button aria-pressed={format === 'booklet'} title="Booklet Portrait — paginated spreads" className={'fmt-btn' + (format === 'booklet' ? ' active' : '')} onClick={() => setFormat('booklet')}>Booklet</button>
             <button aria-pressed={format === 'bookleth'} title="Booklet Landscape — paginated spreads" className={'fmt-btn' + (format === 'bookleth' ? ' active' : '')} onClick={() => setFormat('bookleth')}>Booklet ↔</button>
           </div>
-          <span className={'status' + (status.startsWith('Error') ? ' status-error' : '')} role="status" aria-live="polite">{busy ? '\u25CC ' : ''}{status}</span>
         </div>
 
         {menu ? (
@@ -425,7 +446,6 @@ export default function App() {
           </div>
         ) : (
           <div className="empty">
-            <div className="empty-icon">&#9760;</div>
             <div className="empty-text">Upload a reference, write a brief,<br/>compose your menu.</div>
           </div>
         )}
@@ -433,7 +453,7 @@ export default function App() {
 
       <aside className="panel panel-right">
         <div className="panel-header">
-          <div className="kicker">Adjust</div>
+          <div className="kicker">Menu Style</div>
           <h1>Style</h1>
         </div>
         {menu ? (
@@ -462,17 +482,19 @@ export default function App() {
               <div className="block-title">Layout</div>
               <span className="src-label">Spacing</span>
               <div className="style-row">
-                {['Compact', 'Balanced', 'Airy'].map(s => {
-                  const val = s.toLowerCase();
-                  return (
-                    <button key={s}
-                      className={'style-chip' + ((menu.render_spec?.spacing || 'balanced') === val ? ' active' : '')}
-                      onClick={() => editMenu(['render_spec', 'spacing'], val)}
-                    >{s}</button>
-                  );
-                })}
+                {[
+                  ['Compact',  'compact',  'Tighter padding and item spacing'],
+                  ['Balanced', 'balanced', 'Default spacing'],
+                  ['Airy',     'airy',     'Generous breathing room between items'],
+                ].map(([label, val, tip]) => (
+                  <button key={val}
+                    className={'style-chip' + ((menu.render_spec?.spacing || 'balanced') === val ? ' active' : '')}
+                    onClick={() => editMenu(['render_spec', 'spacing'], val)}
+                    title={tip}
+                  >{label}</button>
+                ))}
               </div>
-              <span className="src-label" style={{ marginTop: '10px', display: 'block' }}>Title Size</span>
+              <span className="src-label">Title</span>
               <div className="style-row">
                 {[['S', 0.75], ['M', 1], ['L', 1.3]].map(([label, scale]) => (
                   <button key={label}
@@ -514,7 +536,7 @@ export default function App() {
                   >{f}</button>
                 ))}
               </div>
-              <span className="src-label" style={{ marginTop: '10px', display: 'block' }}>Body</span>
+              <span className="src-label">Body</span>
               <div className="font-col">
                 {BODY_FONTS.map(f => (
                   <button key={f}

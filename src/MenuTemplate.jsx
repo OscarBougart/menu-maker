@@ -1,7 +1,9 @@
 import React, { useRef } from 'react';
+import { MENU_DEFAULTS } from './theme.js';
 
 const BOOKLET_ITEMS_PER_PAGE = 5;
 const BOOKLET_H_ITEMS_PER_PAGE = 4;
+const A5_ITEMS_PER_PAGE = 6;
 
 // Safe nested-read — returns { x:0, y:0 } if any key is absent
 function getOffset(obj, ...keys) {
@@ -61,10 +63,10 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
   const sp = SPACING[spec.spacing] || SPACING.balanced;
 
   const styleVars = {
-    '--m-bg':          spec.background   || '#0c0d0e',
-    '--m-text':        spec.text_primary || '#e8e4db',
-    '--m-muted':       spec.text_muted   || '#9a958c',
-    '--m-accent':      spec.accent       || '#9a7b3f',
+    '--m-bg':          spec.background   || MENU_DEFAULTS.bg,
+    '--m-text':        spec.text_primary || MENU_DEFAULTS.text,
+    '--m-muted':       spec.text_muted   || MENU_DEFAULTS.muted,
+    '--m-accent':      spec.accent       || MENU_DEFAULTS.accent,
     '--m-display':     `'${spec.display_font || 'Cormorant Garamond'}'`,
     '--m-body':        `'${spec.body_font    || 'Archivo Narrow'}'`,
     '--m-pad-v':       sp.padV,
@@ -197,15 +199,61 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
     </div>
   );
 
-  /* ── A5 PORTRAIT: one dense page ─────────────────────────── */
+  /* ── A5 PORTRAIT: paginated pages ────────────────────────── */
   if (format === 'a5') {
+    const a5Pages = [];
+    a5Pages.push({ type: 'cover' });
+
+    let a5Current = { type: 'content', blocks: [] };
+    let a5Count = 0;
+    const pushA5Page = () => {
+      if (a5Current.blocks.length) a5Pages.push(a5Current);
+      a5Current = { type: 'content', blocks: [] };
+      a5Count = 0;
+    };
+
+    sections.forEach((section, si) => {
+      if (a5Count > 0 && a5Count >= A5_ITEMS_PER_PAGE - 1) pushA5Page();
+      a5Current.blocks.push({ kind: 'section', section, si });
+      (section.cocktails || []).forEach((c, ci) => {
+        if (a5Count >= A5_ITEMS_PER_PAGE) pushA5Page();
+        a5Current.blocks.push({ kind: 'cocktail', c, si, ci });
+        a5Count++;
+      });
+    });
+    pushA5Page();
+    if (menu.note) a5Pages.push({ type: 'footer' });
+
     return (
-      <div className="menu-sheet sheet-a5" id="menu-sheet" style={styleVars}>
-        <div className="menu-pad">
-          <Cover />
-          <SectionList />
-          <Footer />
-        </div>
+      <div className="booklet" id="menu-sheet" style={styleVars}>
+        {a5Pages.map((page, pi) => {
+          if (page.type === 'cover') return (
+            <div className="menu-sheet sheet-booklet page-cover" key={pi}>
+              <div className="menu-pad menu-pad-cover"><Cover /></div>
+            </div>
+          );
+          if (page.type === 'footer') return (
+            <div className="menu-sheet sheet-booklet page-footer" key={pi}>
+              <div className="menu-pad menu-pad-cover">
+                <div className="m-divider"><span className="m-orn">✦</span></div>
+                <Footer />
+              </div>
+            </div>
+          );
+          return (
+            <div className="menu-sheet sheet-a5" key={pi}>
+              <div className="menu-pad">
+                <div className="m-columns" style={{ columnCount: columns, columnGap: '32px' }}>
+                  {page.blocks.map((b, bi) =>
+                    b.kind === 'section'
+                      ? <div key={bi} style={{ breakInside: 'avoid' }}><SectionTitle section={b.section} si={b.si} /></div>
+                      : <div key={bi} style={{ breakInside: 'avoid' }}><Cocktail c={b.c} si={b.si} ci={b.ci} /></div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
     );
   }
