@@ -169,8 +169,8 @@ textarea::placeholder, input::placeholder { color: var(--bone-faint); font-style
   border-radius: 2px; padding: 14px; margin-top: 12px;
 }
 .rules-summary {
-  font-family: 'Cormorant Garamond', serif; font-style: italic;
-  font-weight: 300; font-size: 14px; color: var(--bone); line-height: 1.4; margin-bottom: 12px;
+  font-family: 'Cormorant Garamond', serif; font-style: normal;
+  font-weight: 400; font-size: 14px; color: var(--bone); line-height: 1.5; margin-bottom: 12px;
 }
 .swatch-row { display: flex; gap: 6px; margin-bottom: 12px; }
 .swatch { width: 28px; height: 28px; border-radius: 2px; border: 1px solid var(--line); }
