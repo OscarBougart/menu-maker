@@ -1,6 +1,15 @@
 import React, { useState, useRef, useEffect } from 'react';
 import MenuTemplate from './MenuTemplate.jsx';
 
+const DISPLAY_FONTS = [
+  'Cormorant Garamond', 'Playfair Display', 'EB Garamond',
+  'Cinzel', 'Bodoni Moda', 'DM Serif Display', 'Libre Baskerville',
+];
+const BODY_FONTS = [
+  'Archivo Narrow', 'Jost', 'Inter Tight',
+  'Barlow Condensed', 'DM Sans', 'Outfit',
+];
+
 export default function App() {
   const [imagePreview, setImagePreview] = useState(null);
   const [imageFile, setImageFile] = useState(null);
@@ -149,7 +158,10 @@ export default function App() {
     setMenu((prev) => {
       const next = structuredClone(prev);
       let node = next;
-      for (let i = 0; i < path.length - 1; i++) node = node[path[i]];
+      for (let i = 0; i < path.length - 1; i++) {
+        if (node[path[i]] == null) node[path[i]] = typeof path[i + 1] === 'number' ? [] : {};
+        node = node[path[i]];
+      }
       node[path[path.length - 1]] = value;
       return next;
     });
@@ -212,7 +224,7 @@ export default function App() {
             aria-label="Upload a reference menu photo"
             className={'dropzone' + (imagePreview ? ' has-image' : '') + (dragOver ? ' drag-over' : '')}
             onClick={() => fileRef.current?.click()}
-            onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && fileRef.current?.click()}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileRef.current?.click(); } }}
             onDragOver={onDragOver}
             onDragLeave={onDragLeave}
             onDrop={onDrop}
@@ -393,7 +405,7 @@ export default function App() {
 
         {menu ? (
           <>
-            <MenuTemplate menu={menu} format={format} columns={columns} onEdit={editMenu} />
+            <MenuTemplate menu={menu} format={format} columns={columns} onEdit={editMenu} onDrag={editMenu} />
             <div className="edit-hint">Click any text on the menu to edit it before exporting.</div>
             <div className="export-bar">
               <button className="export-btn" onClick={exportPDF}>Export PDF</button>
@@ -418,6 +430,106 @@ export default function App() {
           </div>
         )}
       </main>
+
+      <aside className="panel panel-right">
+        <div className="panel-header">
+          <div className="kicker">Adjust</div>
+          <h1>Style</h1>
+        </div>
+        {menu ? (
+          <>
+            <div className="block">
+              <div className="block-title">Colors</div>
+              <div className="style-row">
+                {[
+                  { key: 'background',   label: 'BG'     },
+                  { key: 'text_primary', label: 'Text'   },
+                  { key: 'accent',       label: 'Accent' },
+                  { key: 'text_muted',   label: 'Muted'  },
+                ].map(({ key, label }) => (
+                  <label key={key} className="color-swatch-wrap" title={label}>
+                    <input type="color" className="color-input"
+                      value={menu.render_spec?.[key] || '#888888'}
+                      onChange={(e) => editMenu(['render_spec', key], e.target.value)}
+                    />
+                    <span className="color-name">{label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="block">
+              <div className="block-title">Layout</div>
+              <span className="src-label">Spacing</span>
+              <div className="style-row">
+                {['Compact', 'Balanced', 'Airy'].map(s => {
+                  const val = s.toLowerCase();
+                  return (
+                    <button key={s}
+                      className={'style-chip' + ((menu.render_spec?.spacing || 'balanced') === val ? ' active' : '')}
+                      onClick={() => editMenu(['render_spec', 'spacing'], val)}
+                    >{s}</button>
+                  );
+                })}
+              </div>
+              <span className="src-label" style={{ marginTop: '10px', display: 'block' }}>Title Size</span>
+              <div className="style-row">
+                {[['S', 0.75], ['M', 1], ['L', 1.3]].map(([label, scale]) => (
+                  <button key={label}
+                    className={'style-chip' + ((menu.render_spec?.title_scale || 1) === scale ? ' active' : '')}
+                    onClick={() => editMenu(['render_spec', 'title_scale'], scale)}
+                  >{label}</button>
+                ))}
+              </div>
+            </div>
+
+            <div className="block">
+              <div className="block-title">Content</div>
+              <div className="style-row">
+                {[
+                  { key: 'show_ingredients', label: 'Ingredients' },
+                  { key: 'show_prices',      label: 'Prices'      },
+                ].map(({ key, label }) => {
+                  const on = menu.render_spec?.[key] !== false;
+                  return (
+                    <button key={key}
+                      className={'style-chip toggle-chip' + (on ? ' active' : '')}
+                      onClick={() => editMenu(['render_spec', key], !on)}
+                      aria-pressed={on}
+                    >{on ? '✓ ' : ''}{label}</button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="block">
+              <div className="block-title">Fonts</div>
+              <span className="src-label">Display</span>
+              <div className="font-col">
+                {DISPLAY_FONTS.map(f => (
+                  <button key={f}
+                    className={'font-chip' + ((menu.render_spec?.display_font || 'Cormorant Garamond') === f ? ' active' : '')}
+                    style={{ fontFamily: `'${f}', serif` }}
+                    onClick={() => editMenu(['render_spec', 'display_font'], f)}
+                  >{f}</button>
+                ))}
+              </div>
+              <span className="src-label" style={{ marginTop: '10px', display: 'block' }}>Body</span>
+              <div className="font-col">
+                {BODY_FONTS.map(f => (
+                  <button key={f}
+                    className={'font-chip' + ((menu.render_spec?.body_font || 'Archivo Narrow') === f ? ' active' : '')}
+                    style={{ fontFamily: `'${f}', sans-serif` }}
+                    onClick={() => editMenu(['render_spec', 'body_font'], f)}
+                  >{f}</button>
+                ))}
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="panel-empty">Generate a menu to adjust its style.</div>
+        )}
+      </aside>
     </div>
   );
 }
