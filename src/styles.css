@@ -648,6 +648,56 @@ textarea::placeholder, input::placeholder { color: var(--bone-faint); font-style
 .drag-handle:active { cursor: grabbing; }
 @media print { .drag-handle { display: none !important; } }
 
+/* ── ORNAMENTS ── */
+.ornament-corner {
+  position: absolute;
+  width: 48px; height: 48px;
+  pointer-events: none;
+  display: block;
+}
+.ornament-corner--tl { top: 8px; left: 8px; }
+.ornament-corner--tr { top: 8px; right: 8px; }
+.ornament-corner--br { bottom: 8px; right: 8px; }
+.ornament-corner--bl { bottom: 8px; left: 8px; }
+
+.ornament-cartouche {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  pointer-events: none; display: block;
+}
+
+.has-cartouche::before { display: none; }
+
+.ornament-divider {
+  width: 80px; height: 16px;
+  display: block; flex-shrink: 0;
+}
+
+.m-section {
+  display: flex; align-items: center;
+  justify-content: center; gap: 8px;
+}
+.ornament-section-accent {
+  width: 16px; height: 16px;
+  flex-shrink: 0; display: block;
+}
+.m-section .ornament-section-accent:last-child { transform: scaleX(-1); }
+
+.ornament-item-rule {
+  display: block;
+  width: 100%; height: 8px;
+  margin-bottom: 6px;
+  opacity: 0.6;
+}
+
+@media print {
+  .ornament-corner,
+  .ornament-cartouche,
+  .ornament-divider,
+  .ornament-section-accent,
+  .ornament-item-rule { display: block !important; }
+}
+
 /* ── REDUCED MOTION ── */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

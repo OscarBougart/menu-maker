@@ -29,6 +29,10 @@ export default function App() {
   const [masterInfo, setMasterInfo] = useState(null);
   const [savedMenus, setSavedMenus] = useState([]);
   const [columns, setColumns] = useState(1);
+  const [ornaments, setOrnaments] = useState({
+    style: 'none',
+    placement: { cover: true, allPages: false, sections: true, items: false },
+  });
   const [extracting, setExtracting] = useState(false);
   const [merging, setMerging] = useState(false);
   const [error, setError] = useState(null);
@@ -426,7 +430,7 @@ export default function App() {
 
         {menu ? (
           <>
-            <MenuTemplate menu={menu} format={format} columns={columns} onEdit={editMenu} onDrag={editMenu} />
+            <MenuTemplate menu={menu} format={format} columns={columns} onEdit={editMenu} onDrag={editMenu} ornaments={ornaments} />
             <div className="edit-hint">Click any text on the menu to edit it before exporting.</div>
             <div className="export-bar">
               <button className="export-btn" onClick={exportPDF}>Export PDF</button>
@@ -503,6 +507,51 @@ export default function App() {
                   >{label}</button>
                 ))}
               </div>
+            </div>
+
+            <div className="block">
+              <div className="block-title">Ornaments</div>
+              <span className="src-label">Style</span>
+              <select className="src-select"
+                value={ornaments.style}
+                onChange={(e) => setOrnaments(o => ({ ...o, style: e.target.value }))}>
+                <option value="none">None</option>
+                <option value="baroque">Baroque</option>
+                <option value="art_nouveau">Art Nouveau</option>
+                <option value="victorian">Victorian</option>
+                <option value="minimal">Minimal</option>
+                <option value="art_deco">Art Deco</option>
+                <option value="gothic">Gothic</option>
+                <option value="neoclassical">Neoclassical</option>
+                <option value="celtic">Celtic</option>
+                <option value="japanese">Japanese</option>
+                <option value="hairline">Hairline</option>
+                <option value="bauhaus">Bauhaus</option>
+              </select>
+              {ornaments.style !== 'none' && (
+                <>
+                  <span className="src-label" style={{ marginTop: 10 }}>Placement</span>
+                  <div className="style-row">
+                    {[
+                      { key: 'cover',    label: 'Cover'     },
+                      { key: 'allPages', label: 'All pages' },
+                      { key: 'sections', label: 'Sections'  },
+                      { key: 'items',    label: 'Items'     },
+                    ].map(({ key, label }) => {
+                      const on = ornaments.placement[key];
+                      return (
+                        <button key={key}
+                          className={'style-chip toggle-chip' + (on ? ' active' : '')}
+                          onClick={() => setOrnaments(o => ({
+                            ...o, placement: { ...o.placement, [key]: !on }
+                          }))}
+                          aria-pressed={on}
+                        >{on ? '✓ ' : ''}{label}</button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="block">

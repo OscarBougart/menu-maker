@@ -1,5 +1,6 @@
 import React, { useRef } from 'react';
 import { MENU_DEFAULTS } from './theme.js';
+import { ORNAMENT_STYLES } from './ornaments.js';
 
 const BOOKLET_ITEMS_PER_PAGE = 5;
 const BOOKLET_H_ITEMS_PER_PAGE = 4;
@@ -50,8 +51,60 @@ function DragHandle({ path, offset, onDrag }) {
   );
 }
 
-export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit, onDrag }) {
+export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit, onDrag, ornaments = { style: 'none', placement: {} } }) {
   if (!menu) return null;
+
+  const pack = ORNAMENT_STYLES[ornaments.style] || null;
+  const pl = ornaments.placement || {};
+
+  const OrnSvg = ({ slot, className, style: extraStyle = {} }) => {
+    if (!pack) return null;
+    const s = pack[slot];
+    if (!s) return null;
+    const fillAttr   = s.strokeOnly ? 'none' : 'currentColor';
+    const strokeAttr = s.strokeOnly ? 'currentColor' : 'none';
+    return (
+      <svg className={className} viewBox={s.viewBox}
+           style={{ color: 'var(--m-accent)', ...extraStyle }}
+           aria-hidden="true">
+        <path d={s.path} fill={fillAttr} stroke={strokeAttr} strokeWidth={s.strokeOnly ? 1.5 : 0} />
+      </svg>
+    );
+  };
+
+  const CornerSet = () => !pack ? null : (
+    <>
+      {[
+        { pos: 'tl', transform: 'none' },
+        { pos: 'tr', transform: 'scaleX(-1)' },
+        { pos: 'br', transform: 'rotate(180deg)' },
+        { pos: 'bl', transform: 'scaleY(-1)' },
+      ].map(({ pos, transform }) => (
+        <OrnSvg key={pos} slot="corner"
+          className={`ornament-corner ornament-corner--${pos}`}
+          style={{ color: 'var(--m-accent)', transform }} />
+      ))}
+    </>
+  );
+
+  const CartoucheFrame = () => !pack || !pl.cover ? null : (
+    <svg className="ornament-cartouche" viewBox={pack.cartouche.viewBox}
+         style={{ color: 'var(--m-accent)' }} aria-hidden="true">
+      <path d={pack.cartouche.path} fill="none" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
+
+  const OrnamentDivider = () => !pack ? <span className="m-orn">✦</span> : (
+    <OrnSvg slot="divider" className="ornament-divider" />
+  );
+
+  const SectionAccent = () => !pack || !pl.sections ? null : (
+    <OrnSvg slot="sectionAccent" className="ornament-section-accent" />
+  );
+
+  const ItemTopRule = () => !pack || !pl.items ? null : (
+    <OrnSvg slot="itemRule" className="ornament-item-rule" />
+  );
 
   const spec = menu.render_spec || {};
 
@@ -88,6 +141,7 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
     const off = getOffset(layout, 'sections', si, 'cocktails', ci);
     return (
       <div className="draggable-block m-item" style={{ top: off.y, left: off.x }}>
+        <ItemTopRule />
         {onDrag && <DragHandle path={['_layout', 'sections', si, 'cocktails', ci]} offset={off} onDrag={onDrag} />}
         <div className="m-item-head">
           <span className="m-name" contentEditable suppressContentEditableWarning
@@ -124,10 +178,14 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
     return (
       <div className="draggable-block" style={{ top: off.y, left: off.x }}>
         {onDrag && <DragHandle path={['_layout', 'sections', si, 'header']} offset={off} onDrag={onDrag} />}
-        <div className="m-section" contentEditable suppressContentEditableWarning
-          role="textbox" aria-multiline="false" aria-label="Section title"
-          onBlur={(e) => edit(['sections', si, 'title'], e.target.innerText)}>
-          {section.title}
+        <div className="m-section">
+          <SectionAccent />
+          <span contentEditable suppressContentEditableWarning
+            role="textbox" aria-multiline="false" aria-label="Section title"
+            onBlur={(e) => edit(['sections', si, 'title'], e.target.innerText)}>
+            {section.title}
+          </span>
+          <SectionAccent />
         </div>
       </div>
     );
@@ -162,7 +220,7 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
         </div>
         <div className="draggable-block" style={{ top: dOff.y, left: dOff.x }}>
           {onDrag && <DragHandle path={['_layout', 'cover', 'divider']} offset={dOff} onDrag={onDrag} />}
-          <div className="m-divider"><span className="m-orn">✦</span></div>
+          <div className="m-divider"><OrnamentDivider /></div>
         </div>
       </>
     );
@@ -228,20 +286,24 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
       <div className="booklet" id="menu-sheet" style={styleVars}>
         {a5Pages.map((page, pi) => {
           if (page.type === 'cover') return (
-            <div className="menu-sheet sheet-booklet page-cover" key={pi}>
+            <div className={`menu-sheet sheet-booklet page-cover${pl.cover && pack ? ' has-cartouche' : ''}`} key={pi}>
+              {pl.cover && pack && <CornerSet />}
+              <CartoucheFrame />
               <div className="menu-pad menu-pad-cover"><Cover /></div>
             </div>
           );
           if (page.type === 'footer') return (
             <div className="menu-sheet sheet-booklet page-footer" key={pi}>
+              {pl.allPages && pack && <CornerSet />}
               <div className="menu-pad menu-pad-cover">
-                <div className="m-divider"><span className="m-orn">✦</span></div>
+                <div className="m-divider"><OrnamentDivider /></div>
                 <Footer />
               </div>
             </div>
           );
           return (
             <div className="menu-sheet sheet-a5" key={pi}>
+              {pl.allPages && pack && <CornerSet />}
               <div className="menu-pad">
                 <div className="m-columns" style={{ columnCount: columns, columnGap: '32px' }}>
                   {page.blocks.map((b, bi) =>
@@ -261,7 +323,9 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
   /* ── A5 LANDSCAPE: two-column — cover left, drinks right ─── */
   if (format === 'a5h') {
     return (
-      <div className="menu-sheet sheet-a5h" id="menu-sheet" style={styleVars}>
+      <div className={`menu-sheet sheet-a5h${pl.cover && pack ? ' has-cartouche' : ''}`} id="menu-sheet" style={styleVars}>
+        {pl.cover && pack && <CornerSet />}
+        <CartoucheFrame />
         <div className="menu-pad-h">
           <div className="menu-col-cover">
             <Cover />
@@ -306,7 +370,9 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
         {hPages.map((page, pi) => {
           if (page.type === 'cover') {
             return (
-              <div className="menu-sheet sheet-a5h page-cover-h" key={pi}>
+              <div className={`menu-sheet sheet-a5h page-cover-h${pl.cover && pack ? ' has-cartouche' : ''}`} key={pi}>
+                {pl.cover && pack && <CornerSet />}
+                <CartoucheFrame />
                 <div className="menu-pad-h menu-pad-h-cover">
                   <Cover />
                 </div>
@@ -316,8 +382,9 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
           if (page.type === 'footer') {
             return (
               <div className="menu-sheet sheet-a5h page-footer-h" key={pi}>
+                {pl.allPages && pack && <CornerSet />}
                 <div className="menu-pad-h menu-pad-h-cover">
-                  <div className="m-divider"><span className="m-orn">✦</span></div>
+                  <div className="m-divider"><OrnamentDivider /></div>
                   <Footer />
                 </div>
               </div>
@@ -325,6 +392,7 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
           }
           return (
             <div className="menu-sheet sheet-a5h" key={pi}>
+              {pl.allPages && pack && <CornerSet />}
               <div className="menu-pad">
                 <div className="m-columns" style={{ columnCount: columns, columnGap: '32px' }}>
                   {page.blocks.map((b, bi) =>
@@ -370,7 +438,9 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
       {pages.map((page, pi) => {
         if (page.type === 'cover') {
           return (
-            <div className="menu-sheet sheet-booklet page-cover" key={pi}>
+            <div className={`menu-sheet sheet-booklet page-cover${pl.cover && pack ? ' has-cartouche' : ''}`} key={pi}>
+              {pl.cover && pack && <CornerSet />}
+              <CartoucheFrame />
               <div className="menu-pad menu-pad-cover"><Cover /></div>
             </div>
           );
@@ -378,8 +448,9 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
         if (page.type === 'footer') {
           return (
             <div className="menu-sheet sheet-booklet page-footer" key={pi}>
+              {pl.allPages && pack && <CornerSet />}
               <div className="menu-pad menu-pad-cover">
-                <div className="m-divider"><span className="m-orn">✦</span></div>
+                <div className="m-divider"><OrnamentDivider /></div>
                 <Footer />
               </div>
             </div>
@@ -387,6 +458,7 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
         }
         return (
           <div className="menu-sheet sheet-booklet" key={pi}>
+            {pl.allPages && pack && <CornerSet />}
             <div className="menu-pad">
               <div className="m-columns" style={{ columnCount: columns, columnGap: '32px' }}>
                 {page.blocks.map((b, bi) =>
