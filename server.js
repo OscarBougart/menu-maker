@@ -151,13 +151,13 @@ Return ONLY valid JSON, no markdown. Echo back a final palette/type spec so the 
   "sections": [
     { "title": "string",
       "cocktails": [
-        { "name":"string", "description":"string", "ingredients":"string (CAPS, spirit first)", "price":"string" }
+        { "name":"string", "description":"string", "ingredients":"string (CAPS, spirit first)", "price":"string — a realistic price for an upscale cocktail bar, e.g. '14' or '16' (digits only, no currency symbol)" }
       ] } ]
 }`;
 
     const msg = await anthropic.messages.create({
       model: MODEL,
-      max_tokens: 2000,
+      max_tokens: 4096,
       system: sys,
       messages: [{ role: 'user', content: userPrompt }],
     });

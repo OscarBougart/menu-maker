@@ -31,8 +31,11 @@ export default function App() {
   const [columns, setColumns] = useState(1);
   const [ornaments, setOrnaments] = useState({
     style: 'none',
-    placement: { cover: true, allPages: false, sections: true, items: false },
+    placement: { corners: true, cartouche: false, allPages: false, sections: true, items: false },
+    border: true,
   });
+  const [contentAlign, setContentAlign] = useState('center');
+  const [zoom, setZoom] = useState(1);
   const [extracting, setExtracting] = useState(false);
   const [merging, setMerging] = useState(false);
   const [error, setError] = useState(null);
@@ -184,6 +187,58 @@ export default function App() {
   };
 
   const exportPDF = () => { setPrintHint(true); window.print(); };
+
+  const saveAsPDF = async () => {
+    const el = document.getElementById('menu-sheet');
+    if (!el) return;
+    setBusy(true);
+    setStatus('Generating PDF…');
+    try {
+      // Wait for all fonts (Google Fonts) to finish loading before capture
+      await document.fonts.ready;
+
+      const { default: html2canvas } = await import('html2canvas');
+      const { jsPDF } = await import('jspdf');
+
+      const isLandscape = format === 'a5h' || format === 'bookleth';
+      const orientation = isLandscape ? 'landscape' : 'portrait';
+
+      const sheets = el.classList.contains('booklet')
+        ? Array.from(el.querySelectorAll('.menu-sheet'))
+        : [el];
+
+      const pdf = new jsPDF({ orientation, unit: 'mm', format: 'a5' });
+
+      for (let i = 0; i < sheets.length; i++) {
+        const sheet = sheets[i];
+        const isSheetLandscape = sheet.classList.contains('sheet-a5h');
+        const bgColor = getComputedStyle(sheet).getPropertyValue('--m-bg').trim() || '#1a1a1a';
+        const canvas = await html2canvas(sheet, {
+          scale: 3,
+          useCORS: true,
+          allowTaint: true,
+          logging: false,
+          backgroundColor: bgColor,
+        });
+        const imgData = canvas.toDataURL('image/png');
+        if (i > 0) {
+          pdf.addPage('a5', isSheetLandscape ? 'landscape' : 'portrait');
+        }
+        const w = isSheetLandscape ? 210 : 148;
+        const h = isSheetLandscape ? 148 : 210;
+        pdf.addImage(imgData, 'PNG', 0, 0, w, h);
+      }
+
+      const filename = (menu?.bar_name || 'menu').replace(/[^a-z0-9]/gi, '-').toLowerCase() + '.pdf';
+      pdf.save(filename);
+      setStatus('PDF saved');
+    } catch (err) {
+      setError(err.message);
+      setStatus('Error: ' + err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
   const saveMenu = async () => {
     if (!menu) return;
     setBusy(true);
@@ -420,6 +475,12 @@ export default function App() {
       <main className="canvas">
         <div className="canvas-bar">
           <span className="canvas-label">Menu Preview</span>
+          <div className="zoom-controls">
+            <button className="zoom-btn" onClick={() => setZoom(z => Math.max(0.4, +(z - 0.1).toFixed(1)))} aria-label="Zoom out" title="Zoom out">−</button>
+            <span className="zoom-label">{Math.round(zoom * 100)}%</span>
+            <button className="zoom-btn" onClick={() => setZoom(z => Math.min(2, +(z + 0.1).toFixed(1)))} aria-label="Zoom in" title="Zoom in">+</button>
+            <button className="zoom-btn zoom-btn-reset" onClick={() => setZoom(1)} aria-label="Reset zoom" title="Reset zoom">⟳</button>
+          </div>
           <div className="format-toggle">
             <button aria-pressed={format === 'a5'} title="A5 Portrait — single dense page" className={'fmt-btn' + (format === 'a5' ? ' active' : '')} onClick={() => setFormat('a5')}>A5</button>
             <button aria-pressed={format === 'a5h'} title="A5 Landscape — cover left, drinks right" className={'fmt-btn' + (format === 'a5h' ? ' active' : '')} onClick={() => setFormat('a5h')}>A5 ↔</button>
@@ -430,10 +491,12 @@ export default function App() {
 
         {menu ? (
           <>
-            <MenuTemplate menu={menu} format={format} columns={columns} onEdit={editMenu} onDrag={editMenu} ornaments={ornaments} />
-            <div className="edit-hint">Click any text on the menu to edit it before exporting.</div>
+            <div className="zoom-wrapper" style={{ transform: `scale(${zoom})`, transformOrigin: 'top center', transition: 'transform 0.2s' }}>
+              <MenuTemplate menu={menu} format={format} columns={columns} onEdit={editMenu} onDrag={editMenu} ornaments={ornaments} contentAlign={contentAlign} />
+            </div>
+            <div className="edit-hint">Hold and drag to reposition blocks · Double-click text to edit</div>
             <div className="export-bar">
-              <button className="export-btn" onClick={exportPDF}>Export PDF</button>
+              <button className="export-btn" onClick={saveAsPDF} disabled={busy}>Save as PDF</button>
               <button className="export-btn" onClick={saveMenu}>Save to /menus</button>
             </div>
             {printHint && (
@@ -484,33 +547,69 @@ export default function App() {
 
             <div className="block">
               <div className="block-title">Layout</div>
-              <span className="src-label">Spacing</span>
-              <div className="style-row">
+              <span className="src-label">Alignment</span>
+              <div className="style-row" style={{ marginBottom: 10 }}>
                 {[
-                  ['Compact',  'compact',  'Tighter padding and item spacing'],
-                  ['Balanced', 'balanced', 'Default spacing'],
-                  ['Airy',     'airy',     'Generous breathing room between items'],
-                ].map(([label, val, tip]) => (
-                  <button key={val}
-                    className={'style-chip' + ((menu.render_spec?.spacing || 'balanced') === val ? ' active' : '')}
-                    onClick={() => editMenu(['render_spec', 'spacing'], val)}
-                    title={tip}
-                  >{label}</button>
+                  { value: 'left',   label: '⬛ Left'   },
+                  { value: 'center', label: '⬛ Center' },
+                  { value: 'right',  label: '⬛ Right'  },
+                ].map(({ value, label }) => (
+                  <button key={value}
+                    className={'style-chip' + (contentAlign === value ? ' active' : '')}
+                    onClick={() => setContentAlign(value)}
+                    aria-pressed={contentAlign === value}
+                  >{value === 'left' ? '⬤◯◯' : value === 'center' ? '◯⬤◯' : '◯◯⬤'}</button>
                 ))}
               </div>
-              <span className="src-label">Title</span>
-              <div className="style-row">
-                {[['S', 0.75], ['M', 1], ['L', 1.3]].map(([label, scale]) => (
-                  <button key={label}
-                    className={'style-chip' + ((menu.render_spec?.title_scale || 1) === scale ? ' active' : '')}
-                    onClick={() => editMenu(['render_spec', 'title_scale'], scale)}
-                  >{label}</button>
-                ))}
+              <div className="stepper-row">
+                <div className="stepper-group">
+                  <span className="src-label">Title</span>
+                  <div className="style-row">
+                    <button className="style-chip"
+                      onClick={() => editMenu(['render_spec', 'title_scale'], Math.max(0.4, +((menu.render_spec?.title_scale || 1) - 0.05).toFixed(2)))}
+                      aria-label="Smaller title">−</button>
+                    <span className="per-page-num">{Math.round((menu.render_spec?.title_scale || 1) * 42)}px</span>
+                    <button className="style-chip"
+                      onClick={() => editMenu(['render_spec', 'title_scale'], Math.min(2.5, +((menu.render_spec?.title_scale || 1) + 0.05).toFixed(2)))}
+                      aria-label="Larger title">+</button>
+                  </div>
+                </div>
+                <div className="stepper-group">
+                  <span className="src-label">Cocktails</span>
+                  <div className="style-row">
+                    <button className="style-chip"
+                      onClick={() => editMenu(['render_spec', 'items_per_page'], Math.min(20, (menu.render_spec?.items_per_page || 7) + 1))}
+                      aria-label="Smaller cocktails">−</button>
+                    <span className="per-page-num">{Math.round(19 * 553 / ((menu.render_spec?.items_per_page || 7) * 81))}px</span>
+                    <button className="style-chip"
+                      onClick={() => editMenu(['render_spec', 'items_per_page'], Math.max(3, (menu.render_spec?.items_per_page || 7) - 1))}
+                      aria-label="Larger cocktails">+</button>
+                  </div>
+                </div>
+              </div>
+              <div className="stepper-group" style={{ marginTop: 10 }}>
+                <span className="src-label">Spacing</span>
+                <div className="style-row">
+                  <button className="style-chip"
+                    onClick={() => editMenu(['render_spec', 'line_height'], Math.max(0.8, +((menu.render_spec?.line_height || 1.5) - 0.05).toFixed(2)))}
+                    aria-label="Tighter spacing">−</button>
+                  <span className="per-page-num">{(menu.render_spec?.line_height || 1.5).toFixed(1)}</span>
+                  <button className="style-chip"
+                    onClick={() => editMenu(['render_spec', 'line_height'], Math.min(3, +((menu.render_spec?.line_height || 1.5) + 0.05).toFixed(2)))}
+                    aria-label="Looser spacing">+</button>
+                </div>
               </div>
             </div>
 
             <div className="block">
               <div className="block-title">Ornaments</div>
+              <div className="style-row" style={{ marginBottom: 10 }}>
+                <button
+                  className={'style-chip toggle-chip' + (ornaments.border ? ' active' : '')}
+                  onClick={() => setOrnaments(o => ({ ...o, border: !o.border }))}
+                  aria-pressed={ornaments.border}
+                >{ornaments.border ? '✓ ' : ''}Border frame</button>
+              </div>
               <span className="src-label">Style</span>
               <select className="src-select"
                 value={ornaments.style}
@@ -533,10 +632,11 @@ export default function App() {
                   <span className="src-label" style={{ marginTop: 10 }}>Placement</span>
                   <div className="style-row">
                     {[
-                      { key: 'cover',    label: 'Cover'     },
-                      { key: 'allPages', label: 'All pages' },
-                      { key: 'sections', label: 'Sections'  },
-                      { key: 'items',    label: 'Items'     },
+                      { key: 'corners',   label: 'Corners'   },
+                      { key: 'cartouche', label: 'Cartouche' },
+                      { key: 'allPages',  label: 'All pages' },
+                      { key: 'sections',  label: 'Sections'  },
+                      { key: 'items',     label: 'Items'     },
                     ].map(({ key, label }) => {
                       const on = ornaments.placement[key];
                       return (

@@ -1,10 +1,19 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState, useCallback } from 'react';
 import { MENU_DEFAULTS } from './theme.js';
 import { ORNAMENT_STYLES } from './ornaments.js';
 
-const BOOKLET_ITEMS_PER_PAGE = 5;
-const BOOKLET_H_ITEMS_PER_PAGE = 4;
-const A5_ITEMS_PER_PAGE = 6;
+
+function groupBlocks(blocks) {
+  const groups = [];
+  blocks.forEach((b) => {
+    if (b.kind === 'section') {
+      groups.push({ section: b.section, si: b.si, cocktails: [] });
+    } else if (groups.length > 0) {
+      groups[groups.length - 1].cocktails.push(b);
+    }
+  });
+  return groups;
+}
 
 // Safe nested-read — returns { x:0, y:0 } if any key is absent
 function getOffset(obj, ...keys) {
@@ -17,19 +26,29 @@ function getOffset(obj, ...keys) {
 }
 
 // Grip handle — appears on parent hover, hidden in print
-function DragHandle({ path, offset, onDrag }) {
+// Returns mousedown handler that drags the block on hold/move, ignores quick clicks
+function useDragBlock(path, offset, onDrag) {
   const startMouse = useRef(null);
   const startOffset = useRef(null);
+  const dragging = useRef(false);
 
-  const handleMouseDown = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
+  return useCallback((e) => {
+    if (!onDrag) return;
+    // Only primary button, and not on a contentEditable that's already focused
+    if (e.button !== 0) return;
     startMouse.current = { x: e.clientX, y: e.clientY };
     startOffset.current = { ...offset };
+    dragging.current = false;
 
     const handleMove = (e) => {
       const dx = e.clientX - startMouse.current.x;
       const dy = e.clientY - startMouse.current.y;
+      if (!dragging.current && Math.abs(dx) + Math.abs(dy) < 4) return;
+      if (!dragging.current) {
+        dragging.current = true;
+        // blur any focused editable so we don't accidentally type while dragging
+        document.activeElement?.blur();
+      }
       onDrag(path, { x: startOffset.current.x + dx, y: startOffset.current.y + dy });
     };
     const handleUp = () => {
@@ -38,20 +57,58 @@ function DragHandle({ path, offset, onDrag }) {
     };
     document.addEventListener('mousemove', handleMove);
     document.addEventListener('mouseup', handleUp);
+  }, [path, offset, onDrag]);
+}
+
+// Editable span: read-only until double-clicked, saves on blur
+function Editable({ className, value, onSave, multiline = false, style, role }) {
+  const [editing, setEditing] = useState(false);
+  const ref = useRef(null);
+
+  const activate = (e) => {
+    e.stopPropagation(); // prevent block drag starting
+    setEditing(true);
+    setTimeout(() => {
+      ref.current?.focus();
+      // place cursor at end
+      const range = document.createRange();
+      range.selectNodeContents(ref.current);
+      range.collapse(false);
+      window.getSelection()?.removeAllRanges();
+      window.getSelection()?.addRange(range);
+    }, 0);
+  };
+
+  const handleBlur = (e) => {
+    setEditing(false);
+    onSave(e.target.innerText);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Escape') { e.target.blur(); }
+    if (!multiline && e.key === 'Enter') { e.preventDefault(); e.target.blur(); }
   };
 
   return (
     <span
-      className="drag-handle"
-      onMouseDown={handleMouseDown}
-      onDoubleClick={(e) => { e.stopPropagation(); onDrag(path, { x: 0, y: 0 }); }}
-      title="Drag to reposition · Double-click to reset"
-      aria-hidden="true"
-    >⠿</span>
+      ref={ref}
+      className={className}
+      style={{ ...style, display: 'block', cursor: editing ? 'text' : 'inherit', userSelect: editing ? 'text' : 'none' }}
+      contentEditable={editing}
+      suppressContentEditableWarning
+      role={role || 'textbox'}
+      aria-multiline={multiline}
+      onDoubleClick={activate}
+      onBlur={editing ? handleBlur : undefined}
+      onKeyDown={editing ? handleKeyDown : undefined}
+      onMouseDown={editing ? (e) => e.stopPropagation() : undefined}
+    >
+      {value}
+    </span>
   );
 }
 
-export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit, onDrag, ornaments = { style: 'none', placement: {} } }) {
+export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit, onDrag, ornaments = { style: 'none', placement: {} }, contentAlign = 'center' }) {
   if (!menu) return null;
 
   const pack = ORNAMENT_STYLES[ornaments.style] || null;
@@ -87,12 +144,17 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
     </>
   );
 
-  const CartoucheFrame = () => !pack || !pl.cover ? null : (
-    <svg className="ornament-cartouche" viewBox={pack.cartouche.viewBox}
-         style={{ color: 'var(--m-accent)' }} aria-hidden="true">
-      <path d={pack.cartouche.path} fill="none" stroke="currentColor" strokeWidth="1.5" />
-    </svg>
-  );
+  const CartoucheFrame = () => {
+    if (!pack || !pl.cartouche) return null;
+    const isLandscape = format === 'a5h' || format === 'bookleth';
+    const c = (isLandscape && pack.cartoucheH) ? pack.cartoucheH : pack.cartouche;
+    return (
+      <svg className="ornament-cartouche" viewBox={c.viewBox}
+           style={{ color: 'var(--m-accent)' }} aria-hidden="true">
+        <path d={c.path} fill="none" stroke="currentColor" strokeWidth="1.5" />
+      </svg>
+    );
+  };
 
   const OrnamentDivider = () => !pack ? <span className="m-orn">✦</span> : (
     <OrnSvg slot="divider" className="ornament-divider" />
@@ -108,12 +170,22 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
 
   const spec = menu.render_spec || {};
 
-  const SPACING = {
-    compact:  { padV: '28px', padH: '36px', itemGap: '12px', sectionGap: '8px'  },
-    balanced: { padV: '50px', padH: '46px', itemGap: '20px', sectionGap: '16px' },
-    airy:     { padV: '70px', padH: '52px', itemGap: '32px', sectionGap: '26px' },
+  const N = Math.max(1, spec.items_per_page || 7);
+  const ITEM_H_BASE = 81; // name+desc+ing+margins at item_scale=1
+  const titleScale = spec.title_scale || 1;
+  const COVER_H = 113 + (titleScale * 42); // kicker+tagline+divider(113) + title height(varies with S/M/L)
+  const CONTENT_H = {
+    a5:       653 - 100 - COVER_H, // 409px — cover shares this page
+    a5h:      460 - 80,            // 380px — cover is in left column
+    booklet:  653 - 100,           // 553px — cover is a separate page
+    bookleth: 460 - 100,           // 360px — cover is a separate page
   };
-  const sp = SPACING[spec.spacing] || SPACING.balanced;
+  const availableH = CONTENT_H[format] ?? CONTENT_H.booklet;
+  const finalItemScale         = availableH           / (N * ITEM_H_BASE);
+  const finalItemScaleBooklet  = CONTENT_H.booklet    / (N * ITEM_H_BASE);
+  const finalItemScaleBookletH = CONTENT_H.bookleth   / (N * ITEM_H_BASE);
+  const BOOKLET_ITEMS_PER_PAGE   = N;
+  const BOOKLET_H_ITEMS_PER_PAGE = N;
 
   const styleVars = {
     '--m-bg':          spec.background   || MENU_DEFAULTS.bg,
@@ -122,11 +194,15 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
     '--m-accent':      spec.accent       || MENU_DEFAULTS.accent,
     '--m-display':     `'${spec.display_font || 'Cormorant Garamond'}'`,
     '--m-body':        `'${spec.body_font    || 'Archivo Narrow'}'`,
-    '--m-pad-v':       sp.padV,
-    '--m-pad-h':       sp.padH,
-    '--m-item-gap':    sp.itemGap,
-    '--m-section-gap': sp.sectionGap,
+    '--m-pad-v':       '50px',
+    '--m-pad-h':       '46px',
+    '--m-section-gap': '16px',
     '--m-title-size':  `${(spec.title_scale || 1) * 42}px`,
+    '--m-title-scale': `${spec.title_scale || 1}`,
+    '--m-line-height': `${spec.line_height || 1.5}`,
+    '--m-item-scale':  `${finalItemScale}`,
+    '--m-content-align': contentAlign === 'right' ? 'right' : contentAlign === 'left' ? 'left' : 'center',
+    '--m-content-justify': contentAlign === 'right' ? 'flex-end' : contentAlign === 'left' ? 'flex-start' : 'center',
   };
 
   const showIngredients = spec.show_ingredients !== false;
@@ -139,35 +215,27 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
 
   const Cocktail = ({ c, si, ci }) => {
     const off = getOffset(layout, 'sections', si, 'cocktails', ci);
+    const onMouseDown = useDragBlock(['_layout', 'sections', si, 'cocktails', ci], off, onDrag);
     return (
-      <div className="draggable-block m-item" style={{ top: off.y, left: off.x }}>
+      <div className="draggable-block m-item" style={{ top: off.y, left: off.x }} onMouseDown={onDrag ? onMouseDown : undefined}>
         <ItemTopRule />
-        {onDrag && <DragHandle path={['_layout', 'sections', si, 'cocktails', ci]} offset={off} onDrag={onDrag} />}
         <div className="m-item-head">
-          <span className="m-name" contentEditable suppressContentEditableWarning
-            role="textbox" aria-multiline="false" aria-label="Cocktail name"
-            onBlur={(e) => edit(['sections', si, 'cocktails', ci, 'name'], e.target.innerText)}>
-            {c.name}
-          </span>
-          {showPrices && (
-            <span className="m-price" contentEditable suppressContentEditableWarning
-              role="textbox" aria-multiline="false" aria-label="Price"
-              onBlur={(e) => edit(['sections', si, 'cocktails', ci, 'price'], e.target.innerText.replace(/[£$€]/g, ''))}>
-              {c.price}
-            </span>
+          <Editable className="m-name" value={c.name}
+            onSave={(v) => edit(['sections', si, 'cocktails', ci, 'name'], v)}
+            aria-label="Cocktail name" />
+          {showPrices && c.price !== '' && (
+            <Editable className="m-price" value={c.price}
+              onSave={(v) => edit(['sections', si, 'cocktails', ci, 'price'], v.replace(/[£$€]/g, ''))}
+              aria-label="Price" />
           )}
         </div>
-        <div className="m-desc" contentEditable suppressContentEditableWarning
-          role="textbox" aria-multiline="true" aria-label="Description"
-          onBlur={(e) => edit(['sections', si, 'cocktails', ci, 'description'], e.target.innerText)}>
-          {c.description}
-        </div>
+        <Editable className="m-desc" value={c.description} multiline
+          onSave={(v) => edit(['sections', si, 'cocktails', ci, 'description'], v)}
+          aria-label="Description" />
         {showIngredients && (
-          <div className="m-ing" contentEditable suppressContentEditableWarning
-            role="textbox" aria-multiline="true" aria-label="Ingredients"
-            onBlur={(e) => edit(['sections', si, 'cocktails', ci, 'ingredients'], e.target.innerText)}>
-            {c.ingredients}
-          </div>
+          <Editable className="m-ing" value={c.ingredients} multiline
+            onSave={(v) => edit(['sections', si, 'cocktails', ci, 'ingredients'], v)}
+            aria-label="Ingredients" />
         )}
       </div>
     );
@@ -175,16 +243,14 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
 
   const SectionTitle = ({ section, si }) => {
     const off = getOffset(layout, 'sections', si, 'header');
+    const onMouseDown = useDragBlock(['_layout', 'sections', si, 'header'], off, onDrag);
     return (
-      <div className="draggable-block" style={{ top: off.y, left: off.x }}>
-        {onDrag && <DragHandle path={['_layout', 'sections', si, 'header']} offset={off} onDrag={onDrag} />}
+      <div className="draggable-block" style={{ top: off.y, left: off.x }} onMouseDown={onDrag ? onMouseDown : undefined}>
         <div className="m-section">
           <SectionAccent />
-          <span contentEditable suppressContentEditableWarning
-            role="textbox" aria-multiline="false" aria-label="Section title"
-            onBlur={(e) => edit(['sections', si, 'title'], e.target.innerText)}>
-            {section.title}
-          </span>
+          <Editable value={section.title}
+            onSave={(v) => edit(['sections', si, 'title'], v)}
+            aria-label="Section title" />
           <SectionAccent />
         </div>
       </div>
@@ -196,30 +262,24 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
     const tOff  = getOffset(layout, 'cover', 'title');
     const tgOff = getOffset(layout, 'cover', 'tagline');
     const dOff  = getOffset(layout, 'cover', 'divider');
+    const onMouseDownKicker  = useDragBlock(['_layout', 'cover', 'kicker'],  kOff,  onDrag);
+    const onMouseDownTitle   = useDragBlock(['_layout', 'cover', 'title'],   tOff,  onDrag);
+    const onMouseDownTagline = useDragBlock(['_layout', 'cover', 'tagline'], tgOff, onDrag);
+    const onMouseDownDivider = useDragBlock(['_layout', 'cover', 'divider'], dOff,  onDrag);
     return (
       <>
-        <div className="draggable-block" style={{ top: kOff.y, left: kOff.x }}>
-          {onDrag && <DragHandle path={['_layout', 'cover', 'kicker']} offset={kOff} onDrag={onDrag} />}
+        <div className="draggable-block" style={{ top: kOff.y, left: kOff.x }} onMouseDown={onDrag ? onMouseDownKicker : undefined}>
           <div className="m-kicker">Cocktails</div>
         </div>
-        <div className="draggable-block" style={{ top: tOff.y, left: tOff.x }}>
-          {onDrag && <DragHandle path={['_layout', 'cover', 'title']} offset={tOff} onDrag={onDrag} />}
-          <h2 className={'m-title' + (mini ? ' m-title-mini' : '')} contentEditable suppressContentEditableWarning
-            aria-label="Bar name"
-            onBlur={(e) => edit(['bar_name'], e.target.innerText)}>
-            {menu.bar_name}
-          </h2>
+        <div className="draggable-block" style={{ top: tOff.y, left: tOff.x }} onMouseDown={onDrag ? onMouseDownTitle : undefined}>
+          <Editable className={'m-title' + (mini ? ' m-title-mini' : '')} value={menu.bar_name}
+            onSave={(v) => edit(['bar_name'], v)} aria-label="Bar name" />
         </div>
-        <div className="draggable-block" style={{ top: tgOff.y, left: tgOff.x }}>
-          {onDrag && <DragHandle path={['_layout', 'cover', 'tagline']} offset={tgOff} onDrag={onDrag} />}
-          <div className="m-tagline" contentEditable suppressContentEditableWarning
-            role="textbox" aria-multiline="true" aria-label="Tagline"
-            onBlur={(e) => edit(['tagline'], e.target.innerText)}>
-            {menu.tagline}
-          </div>
+        <div className="draggable-block" style={{ top: tgOff.y, left: tgOff.x }} onMouseDown={onDrag ? onMouseDownTagline : undefined}>
+          <Editable className="m-tagline" value={menu.tagline} multiline
+            onSave={(v) => edit(['tagline'], v)} aria-label="Tagline" />
         </div>
-        <div className="draggable-block" style={{ top: dOff.y, left: dOff.x }}>
-          {onDrag && <DragHandle path={['_layout', 'cover', 'divider']} offset={dOff} onDrag={onDrag} />}
+        <div className="draggable-block" style={{ top: dOff.y, left: dOff.x }} onMouseDown={onDrag ? onMouseDownDivider : undefined}>
           <div className="m-divider"><OrnamentDivider /></div>
         </div>
       </>
@@ -228,94 +288,118 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
 
   const Footer = () => {
     const off = getOffset(layout, 'footer');
+    const onMouseDown = useDragBlock(['_layout', 'footer'], off, onDrag);
     return menu.note ? (
-      <div className="draggable-block" style={{ top: off.y, left: off.x }}>
-        {onDrag && <DragHandle path={['_layout', 'footer']} offset={off} onDrag={onDrag} />}
+      <div className="draggable-block" style={{ top: off.y, left: off.x }} onMouseDown={onDrag ? onMouseDown : undefined}>
         <div className="m-footer">
-          <div className="m-footer-text" contentEditable suppressContentEditableWarning
-            role="textbox" aria-multiline="true" aria-label="Menu note"
-            onBlur={(e) => edit(['note'], e.target.innerText)}>
-            {menu.note}
-          </div>
+          <Editable className="m-footer-text" value={menu.note} multiline
+            onSave={(v) => edit(['note'], v)} aria-label="Menu note" />
         </div>
       </div>
     ) : null;
   };
 
   const sections = menu.sections || [];
+  const hasCartouche = !!(pack && pl.cartouche);
+  const noBorder = ornaments.border === false || hasCartouche;
 
-  const SectionList = () => (
-    <div className="m-columns" style={{ columnCount: columns, columnGap: '32px' }}>
-      {sections.map((section, si) => (
-        <div key={si} style={{ breakInside: 'avoid' }}>
-          <SectionTitle section={section} si={si} />
-          {(section.cocktails || []).map((c, ci) => (
-            <Cocktail key={ci} c={c} si={si} ci={ci} />
-          ))}
-        </div>
-      ))}
-    </div>
-  );
 
-  /* ── A5 PORTRAIT: paginated pages ────────────────────────── */
+  const SectionList = ({ blocks }) => {
+    const rows = blocks
+      ? groupBlocks(blocks)
+      : sections.map((section, si) => ({ section, si, cocktails: (section.cocktails || []).map((c, ci) => ({ c, si, ci })) }));
+    return (
+      <div className="m-columns" style={{ columnCount: columns, columnGap: '32px' }}>
+        {rows.map((g, gi) => (
+          <div key={gi} style={{ breakInside: 'avoid' }}>
+            <SectionTitle section={g.section} si={g.si} />
+            {g.cocktails.map((b, bi) => (
+              <Cocktail key={bi} c={b.c} si={b.si} ci={b.ci} />
+            ))}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  /* ── A5 PORTRAIT: paginated like booklet when items > N ─── */
   if (format === 'a5') {
-    const a5Pages = [];
-    a5Pages.push({ type: 'cover' });
+    const totalCocktails = sections.reduce((s, sec) => s + (sec.cocktails || []).length, 0);
+    const needsPagination = totalCocktails > N;
 
-    let a5Current = { type: 'content', blocks: [] };
+    if (!needsPagination) {
+      return (
+        <div
+          className={`menu-sheet sheet-a5${pl.cartouche && pack ? ' has-cartouche' : ''}${noBorder ? ' no-border' : ''}`}
+          id="menu-sheet"
+          style={styleVars}
+        >
+          {pl.corners && pack && <CornerSet />}
+          <CartoucheFrame />
+          <div className="menu-pad">
+            <Cover mini />
+            <SectionList />
+            {menu.note && <Footer />}
+          </div>
+        </div>
+      );
+    }
+
+    // Paginate: cover+first-batch on page 1, then content-only pages
+    const a5Pages = [];
+    let a5Current = { blocks: [] };
     let a5Count = 0;
     const pushA5Page = () => {
-      if (a5Current.blocks.length) a5Pages.push(a5Current);
-      a5Current = { type: 'content', blocks: [] };
+      if (a5Current.blocks.length) a5Pages.push({ ...a5Current });
+      a5Current = { blocks: [] };
       a5Count = 0;
     };
 
     sections.forEach((section, si) => {
-      if (a5Count > 0 && a5Count >= A5_ITEMS_PER_PAGE - 1) pushA5Page();
+      if (a5Count > 0 && a5Count >= N - 1) pushA5Page();
       a5Current.blocks.push({ kind: 'section', section, si });
       (section.cocktails || []).forEach((c, ci) => {
-        if (a5Count >= A5_ITEMS_PER_PAGE) pushA5Page();
+        if (a5Count >= N) pushA5Page();
         a5Current.blocks.push({ kind: 'cocktail', c, si, ci });
         a5Count++;
       });
     });
     pushA5Page();
-    if (menu.note) a5Pages.push({ type: 'footer' });
+
+    const coverBlocks = a5Pages[0]?.blocks || [];
+    const restPages = a5Pages.slice(1);
 
     return (
       <div className="booklet" id="menu-sheet" style={styleVars}>
-        {a5Pages.map((page, pi) => {
-          if (page.type === 'cover') return (
-            <div className={`menu-sheet sheet-booklet page-cover${pl.cover && pack ? ' has-cartouche' : ''}`} key={pi}>
-              {pl.cover && pack && <CornerSet />}
-              <CartoucheFrame />
-              <div className="menu-pad menu-pad-cover"><Cover /></div>
+        {/* Page 1: cover + first batch */}
+        <div className={`menu-sheet sheet-a5${pl.cartouche && pack ? ' has-cartouche' : ''}${noBorder ? ' no-border' : ''}`}>
+          {pl.corners && pack && <CornerSet />}
+          <CartoucheFrame />
+          <div className="menu-pad">
+            <Cover mini />
+            <SectionList blocks={coverBlocks} />
+          </div>
+        </div>
+        {/* Subsequent content pages */}
+        {restPages.map((page, pi) => (
+          <div key={pi} className={`menu-sheet sheet-a5${noBorder ? ' no-border' : ''}`}
+               style={{ '--m-item-scale': finalItemScaleBooklet }}>
+            {pl.allPages && pack && <CornerSet />}
+            <div className="menu-pad">
+              <SectionList blocks={page.blocks} />
             </div>
-          );
-          if (page.type === 'footer') return (
-            <div className="menu-sheet sheet-booklet page-footer" key={pi}>
-              {pl.allPages && pack && <CornerSet />}
-              <div className="menu-pad menu-pad-cover">
-                <div className="m-divider"><OrnamentDivider /></div>
-                <Footer />
-              </div>
+          </div>
+        ))}
+        {/* Footer page */}
+        {menu.note && (
+          <div className={`menu-sheet sheet-a5${noBorder ? ' no-border' : ''}`}>
+            {pl.allPages && pack && <CornerSet />}
+            <div className="menu-pad">
+              <div className="m-divider"><OrnamentDivider /></div>
+              <Footer />
             </div>
-          );
-          return (
-            <div className="menu-sheet sheet-a5" key={pi}>
-              {pl.allPages && pack && <CornerSet />}
-              <div className="menu-pad">
-                <div className="m-columns" style={{ columnCount: columns, columnGap: '32px' }}>
-                  {page.blocks.map((b, bi) =>
-                    b.kind === 'section'
-                      ? <div key={bi} style={{ breakInside: 'avoid' }}><SectionTitle section={b.section} si={b.si} /></div>
-                      : <div key={bi} style={{ breakInside: 'avoid' }}><Cocktail c={b.c} si={b.si} ci={b.ci} /></div>
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })}
+          </div>
+        )}
       </div>
     );
   }
@@ -323,8 +407,8 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
   /* ── A5 LANDSCAPE: two-column — cover left, drinks right ─── */
   if (format === 'a5h') {
     return (
-      <div className={`menu-sheet sheet-a5h${pl.cover && pack ? ' has-cartouche' : ''}`} id="menu-sheet" style={styleVars}>
-        {pl.cover && pack && <CornerSet />}
+      <div className={`menu-sheet sheet-a5h${pl.cartouche && pack ? ' has-cartouche' : ''}${noBorder ? ' no-border' : ''}`} id="menu-sheet" style={styleVars}>
+        {pl.corners && pack && <CornerSet />}
         <CartoucheFrame />
         <div className="menu-pad-h">
           <div className="menu-col-cover">
@@ -333,7 +417,7 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
           </div>
           <div className="menu-col-divider" />
           <div className="menu-col-drinks">
-            <SectionList />
+            <SectionList blocks={null} />
           </div>
         </div>
       </div>
@@ -370,8 +454,8 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
         {hPages.map((page, pi) => {
           if (page.type === 'cover') {
             return (
-              <div className={`menu-sheet sheet-a5h page-cover-h${pl.cover && pack ? ' has-cartouche' : ''}`} key={pi}>
-                {pl.cover && pack && <CornerSet />}
+              <div className={`menu-sheet sheet-a5h page-cover-h${pl.cartouche && pack ? ' has-cartouche' : ''}${noBorder ? ' no-border' : ''}`} key={pi}>
+                {pl.corners && pack && <CornerSet />}
                 <CartoucheFrame />
                 <div className="menu-pad-h menu-pad-h-cover">
                   <Cover />
@@ -381,7 +465,7 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
           }
           if (page.type === 'footer') {
             return (
-              <div className="menu-sheet sheet-a5h page-footer-h" key={pi}>
+              <div className={`menu-sheet sheet-a5h page-footer-h${noBorder ? ' no-border' : ''}`} key={pi}>
                 {pl.allPages && pack && <CornerSet />}
                 <div className="menu-pad-h menu-pad-h-cover">
                   <div className="m-divider"><OrnamentDivider /></div>
@@ -391,16 +475,11 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
             );
           }
           return (
-            <div className="menu-sheet sheet-a5h" key={pi}>
+            <div className={`menu-sheet sheet-a5h${noBorder ? ' no-border' : ''}`} key={pi}
+                 style={{ '--m-item-scale': finalItemScaleBookletH }}>
               {pl.allPages && pack && <CornerSet />}
               <div className="menu-pad">
-                <div className="m-columns" style={{ columnCount: columns, columnGap: '32px' }}>
-                  {page.blocks.map((b, bi) =>
-                    b.kind === 'section'
-                      ? <div key={bi} style={{ breakInside: 'avoid' }}><SectionTitle section={b.section} si={b.si} /></div>
-                      : <div key={bi} style={{ breakInside: 'avoid' }}><Cocktail c={b.c} si={b.si} ci={b.ci} /></div>
-                  )}
-                </div>
+                <SectionList blocks={page.blocks} />
               </div>
             </div>
           );
@@ -438,8 +517,8 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
       {pages.map((page, pi) => {
         if (page.type === 'cover') {
           return (
-            <div className={`menu-sheet sheet-booklet page-cover${pl.cover && pack ? ' has-cartouche' : ''}`} key={pi}>
-              {pl.cover && pack && <CornerSet />}
+            <div className={`menu-sheet sheet-booklet page-cover${pl.cartouche && pack ? ' has-cartouche' : ''}${noBorder ? ' no-border' : ''}`} key={pi}>
+              {pl.corners && pack && <CornerSet />}
               <CartoucheFrame />
               <div className="menu-pad menu-pad-cover"><Cover /></div>
             </div>
@@ -447,7 +526,7 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
         }
         if (page.type === 'footer') {
           return (
-            <div className="menu-sheet sheet-booklet page-footer" key={pi}>
+            <div className={`menu-sheet sheet-booklet page-footer${noBorder ? ' no-border' : ''}`} key={pi}>
               {pl.allPages && pack && <CornerSet />}
               <div className="menu-pad menu-pad-cover">
                 <div className="m-divider"><OrnamentDivider /></div>
@@ -457,16 +536,11 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
           );
         }
         return (
-          <div className="menu-sheet sheet-booklet" key={pi}>
+          <div className={`menu-sheet sheet-booklet${noBorder ? ' no-border' : ''}`} key={pi}
+               style={{ '--m-item-scale': finalItemScaleBooklet }}>
             {pl.allPages && pack && <CornerSet />}
             <div className="menu-pad">
-              <div className="m-columns" style={{ columnCount: columns, columnGap: '32px' }}>
-                {page.blocks.map((b, bi) =>
-                  b.kind === 'section'
-                    ? <div key={bi} style={{ breakInside: 'avoid' }}><SectionTitle section={b.section} si={b.si} /></div>
-                    : <div key={bi} style={{ breakInside: 'avoid' }}><Cocktail c={b.c} si={b.si} ci={b.ci} /></div>
-                )}
-              </div>
+              <SectionList blocks={page.blocks} />
             </div>
           </div>
         );
