@@ -43,6 +43,7 @@ export default function App() {
   const [printHint, setPrintHint] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [dragOver, setDragOver] = useState(false);
+  const [showSaveStyle, setShowSaveStyle] = useState(false);
   const fileRef = useRef(null);
 
   const refreshSources = async () => {
@@ -109,6 +110,7 @@ export default function App() {
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setRules(data);
+      setShowSaveStyle(false);
       setStatus('Design rules extracted');
     } catch (err) { setError(err.message); setStatus('Error: ' + err.message); }
     finally { setBusy(false); setExtracting(false); }
@@ -281,6 +283,12 @@ export default function App() {
         <div className="panel-header">
           <div className="kicker">Local Studio</div>
           <h1>The Menu Maker</h1>
+          {status !== 'Ready' && (
+            <div className="status-inline" role="status" aria-live="polite">
+              <span className={`status-inline-dot${busy ? ' busy' : ''}`} />
+              <span>{status}</span>
+            </div>
+          )}
         </div>
 
         {error && (
@@ -292,7 +300,7 @@ export default function App() {
 
         {/* STEP 1 */}
         <div className="block">
-          <div className="block-title"> Reference Menu</div>
+          <div className="block-title"><span className="step-num">1</span> Reference Menu</div>
           <div
             role="button"
             tabIndex={0}
@@ -306,7 +314,7 @@ export default function App() {
           >
             {imagePreview
               ? <img src={imagePreview} alt="reference" />
-              : <><div className="dropzone-icon">&#9023;</div><div className="dropzone-hint">{dragOver ? 'Release to load image' : 'Drop, paste, or click to upload a photo of a menu you admire.'}</div></>}
+              : <><div className="dropzone-icon">↑</div><div className="dropzone-hint">{dragOver ? 'Release to load image' : 'Drop, paste, or click to upload a photo of a menu you admire.'}</div></>}
           </div>
           <input ref={fileRef} type="file" accept="image/*" onChange={onPickFile} style={{ display: 'none' }} />
           {imageFile && <button className="btn" onClick={extractRules} disabled={busy}>Extract Design Rules</button>}
@@ -331,29 +339,39 @@ export default function App() {
                 {(rules.design_rules || []).slice(0, 5).map((r, i) => <div className="rule-line" key={i}>{r}</div>)}
               </div>
 
-              <input
-                type="text" aria-label="Style name" placeholder="Name this style… e.g. Death & Co"
-                value={refName} onChange={(e) => setRefName(e.target.value)}
-                maxLength={40}
-              />
-              <button className="btn" onClick={saveTemplate} disabled={busy}>Save as Template</button>
-              <p className="btn-caption">Saves as a standalone, reusable style.</p>
-              {!confirmBrain
-                ? <button className="btn btn-blood" onClick={() => setConfirmBrain(true)} disabled={busy}>+ Add to House Brain</button>
-                : <div className="confirm-brain">
-                    <span className="confirm-text">Merge "{(refName || rules.aesthetic_summary?.slice(0, 24) || 'this style').trim()}" into the master library?</span>
-                    <div className="confirm-row-btns">
-                      <button className="btn btn-sm" onClick={() => setConfirmBrain(false)}>Cancel</button>
-                      <button className="btn btn-blood btn-sm" onClick={() => { setConfirmBrain(false); addToHouseBrain(); }} disabled={busy}>Merge</button>
+              <button
+                className="save-style-toggle"
+                onClick={() => setShowSaveStyle(s => !s)}
+                aria-expanded={showSaveStyle}
+              >{showSaveStyle ? '↑ Collapse' : '+ Save this style'}</button>
+
+              {showSaveStyle && (
+                <>
+                  <input
+                    type="text" aria-label="Style name" placeholder="Name this style… e.g. Death & Co"
+                    value={refName} onChange={(e) => setRefName(e.target.value)}
+                    maxLength={40}
+                  />
+                  <button className="btn" onClick={saveTemplate} disabled={busy}>Save as Template</button>
+                  <p className="btn-caption">Saves as a standalone, reusable style.</p>
+                  {!confirmBrain
+                    ? <button className="btn btn-blood" onClick={() => setConfirmBrain(true)} disabled={busy}>+ Add to House Brain</button>
+                    : <div className="confirm-brain">
+                        <span className="confirm-text">Merge "{(refName || rules.aesthetic_summary?.slice(0, 24) || 'this style').trim()}" into the master library?</span>
+                        <div className="confirm-row-btns">
+                          <button className="btn btn-sm" onClick={() => setConfirmBrain(false)}>Cancel</button>
+                          <button className="btn btn-blood btn-sm" onClick={() => { setConfirmBrain(false); addToHouseBrain(); }} disabled={busy}>Merge</button>
+                        </div>
+                      </div>
+                  }
+                  <p className="btn-caption">Merges into your master library, combining with prior styles.</p>
+                  {merging && (
+                    <div className="extract-progress" aria-live="polite" aria-label="Merging into House Brain">
+                      <div className="dots"><span className="dot" /><span className="dot" /><span className="dot" /></div>
+                      <span className="extract-label">Merging into House Brain…</span>
                     </div>
-                  </div>
-              }
-              <p className="btn-caption">Merges into your master library, combining with prior styles.</p>
-              {merging && (
-                <div className="extract-progress" aria-live="polite" aria-label="Merging into House Brain">
-                  <div className="dots"><span className="dot" /><span className="dot" /><span className="dot" /></div>
-                  <span className="extract-label">Merging into House Brain…</span>
-                </div>
+                  )}
+                </>
               )}
             </>
           )}
@@ -386,7 +404,7 @@ export default function App() {
 
         {/* STEP 2 */}
         <div className="block">
-          <div className="block-title"> Compose</div>
+          <div className="block-title"><span className="step-num">2</span> Compose</div>
 
           <label className="src-label" htmlFor="source-select">Draw rules from</label>
           <select id="source-select" className="src-select" value={selectedSource} onChange={(e) => setSelectedSource(e.target.value)}>
@@ -421,14 +439,6 @@ export default function App() {
             placeholder="Your drinks (optional): Oaxacan Old Fashioned, Black Manhattan…"
             value={drinks} onChange={(e) => setDrinks(e.target.value)}
           />
-          <div className="col-picker">
-            <span className="src-label">Columns</span>
-            <div className="col-toggle">
-              {[1, 2, 3].map((n) => (
-                <button key={n} aria-pressed={columns === n} className={'col-btn' + (columns === n ? ' active' : '')} onClick={() => setColumns(n)}>{n}</button>
-              ))}
-            </div>
-          </div>
           <button className="btn-primary" onClick={generate} disabled={busy}>Compose Menu</button>
         </div>
         {/* SAVED MENUS */}
@@ -521,7 +531,7 @@ export default function App() {
       <aside className="panel panel-right">
         <div className="panel-header">
           <div className="kicker">Menu Style</div>
-          <h1>Style</h1>
+          <h2>Style</h2>
         </div>
         {menu ? (
           <>
@@ -546,20 +556,51 @@ export default function App() {
             </div>
 
             <div className="block">
-              <div className="block-title">Layout</div>
-              <span className="src-label">Alignment</span>
-              <div className="style-row" style={{ marginBottom: 10 }}>
-                {[
-                  { value: 'left',   label: '⬛ Left'   },
-                  { value: 'center', label: '⬛ Center' },
-                  { value: 'right',  label: '⬛ Right'  },
-                ].map(({ value, label }) => (
-                  <button key={value}
-                    className={'style-chip' + (contentAlign === value ? ' active' : '')}
-                    onClick={() => setContentAlign(value)}
-                    aria-pressed={contentAlign === value}
-                  >{value === 'left' ? '⬤◯◯' : value === 'center' ? '◯⬤◯' : '◯◯⬤'}</button>
+              <div className="block-title">Fonts</div>
+              <span className="src-label">Display</span>
+              <div className="font-grid">
+                {DISPLAY_FONTS.map(f => (
+                  <button key={f}
+                    className={'font-chip' + ((menu.render_spec?.display_font || 'Cormorant Garamond') === f ? ' active' : '')}
+                    aria-pressed={(menu.render_spec?.display_font || 'Cormorant Garamond') === f}
+                    style={{ fontFamily: `'${f}', serif` }}
+                    onClick={() => editMenu(['render_spec', 'display_font'], f)}
+                  >{f}</button>
                 ))}
+              </div>
+              <span className="src-label">Body</span>
+              <div className="font-grid">
+                {BODY_FONTS.map(f => (
+                  <button key={f}
+                    className={'font-chip' + ((menu.render_spec?.body_font || 'Archivo Narrow') === f ? ' active' : '')}
+                    aria-pressed={(menu.render_spec?.body_font || 'Archivo Narrow') === f}
+                    style={{ fontFamily: `'${f}', sans-serif` }}
+                    onClick={() => editMenu(['render_spec', 'body_font'], f)}
+                  >{f}</button>
+                ))}
+              </div>
+            </div>
+
+            <div className="block">
+              <div className="block-title">Layout</div>
+              <span className="src-label">Columns</span>
+              <div className="style-row" style={{ marginBottom: 12 }}>
+                {[1, 2, 3].map((n) => (
+                  <button key={n} aria-pressed={columns === n} className={'style-chip' + (columns === n ? ' active' : '')} onClick={() => setColumns(n)}>{n}</button>
+                ))}
+              </div>
+              <span className="src-label">Alignment</span>
+              <div className="style-row" style={{ marginBottom: 12 }}>
+                {['Left', 'Center', 'Right'].map((label) => {
+                  const value = label.toLowerCase();
+                  return (
+                    <button key={value}
+                      className={'style-chip' + (contentAlign === value ? ' active' : '')}
+                      onClick={() => setContentAlign(value)}
+                      aria-pressed={contentAlign === value}
+                    >{label}</button>
+                  );
+                })}
               </div>
               <div className="stepper-row">
                 <div className="stepper-group">
@@ -587,7 +628,7 @@ export default function App() {
                   </div>
                 </div>
               </div>
-              <div className="stepper-group" style={{ marginTop: 10 }}>
+              <div className="stepper-group" style={{ marginTop: 12 }}>
                 <span className="src-label">Spacing</span>
                 <div className="style-row">
                   <button className="style-chip"
@@ -602,13 +643,32 @@ export default function App() {
             </div>
 
             <div className="block">
+              <div className="block-title">Content</div>
+              <div className="style-row">
+                {[
+                  { key: 'show_ingredients', label: 'Ingredients' },
+                  { key: 'show_prices',      label: 'Prices'      },
+                ].map(({ key, label }) => {
+                  const on = menu.render_spec?.[key] !== false;
+                  return (
+                    <button key={key}
+                      className={'style-chip toggle-chip' + (on ? ' active' : '')}
+                      onClick={() => editMenu(['render_spec', key], !on)}
+                      aria-pressed={on}
+                    >{label}</button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="block">
               <div className="block-title">Ornaments</div>
               <div className="style-row" style={{ marginBottom: 10 }}>
                 <button
                   className={'style-chip toggle-chip' + (ornaments.border ? ' active' : '')}
                   onClick={() => setOrnaments(o => ({ ...o, border: !o.border }))}
                   aria-pressed={ornaments.border}
-                >{ornaments.border ? '✓ ' : ''}Border frame</button>
+                >Border frame</button>
               </div>
               <span className="src-label">Style</span>
               <select className="src-select"
@@ -630,7 +690,7 @@ export default function App() {
               {ornaments.style !== 'none' && (
                 <>
                   <span className="src-label" style={{ marginTop: 10 }}>Placement</span>
-                  <div className="style-row">
+                  <div className="placement-grid">
                     {[
                       { key: 'corners',   label: 'Corners'   },
                       { key: 'cartouche', label: 'Cartouche' },
@@ -646,55 +706,12 @@ export default function App() {
                             ...o, placement: { ...o.placement, [key]: !on }
                           }))}
                           aria-pressed={on}
-                        >{on ? '✓ ' : ''}{label}</button>
+                        >{label}</button>
                       );
                     })}
                   </div>
                 </>
               )}
-            </div>
-
-            <div className="block">
-              <div className="block-title">Content</div>
-              <div className="style-row">
-                {[
-                  { key: 'show_ingredients', label: 'Ingredients' },
-                  { key: 'show_prices',      label: 'Prices'      },
-                ].map(({ key, label }) => {
-                  const on = menu.render_spec?.[key] !== false;
-                  return (
-                    <button key={key}
-                      className={'style-chip toggle-chip' + (on ? ' active' : '')}
-                      onClick={() => editMenu(['render_spec', key], !on)}
-                      aria-pressed={on}
-                    >{on ? '✓ ' : ''}{label}</button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="block">
-              <div className="block-title">Fonts</div>
-              <span className="src-label">Display</span>
-              <div className="font-col">
-                {DISPLAY_FONTS.map(f => (
-                  <button key={f}
-                    className={'font-chip' + ((menu.render_spec?.display_font || 'Cormorant Garamond') === f ? ' active' : '')}
-                    style={{ fontFamily: `'${f}', serif` }}
-                    onClick={() => editMenu(['render_spec', 'display_font'], f)}
-                  >{f}</button>
-                ))}
-              </div>
-              <span className="src-label">Body</span>
-              <div className="font-col">
-                {BODY_FONTS.map(f => (
-                  <button key={f}
-                    className={'font-chip' + ((menu.render_spec?.body_font || 'Archivo Narrow') === f ? ' active' : '')}
-                    style={{ fontFamily: `'${f}', sans-serif` }}
-                    onClick={() => editMenu(['render_spec', 'body_font'], f)}
-                  >{f}</button>
-                ))}
-              </div>
             </div>
           </>
         ) : (

@@ -25,7 +25,6 @@ function getOffset(obj, ...keys) {
   return node || { x: 0, y: 0 };
 }
 
-// Grip handle — appears on parent hover, hidden in print
 // Returns mousedown handler that drags the block on hold/move, ignores quick clicks
 function useDragBlock(path, offset, onDrag) {
   const startMouse = useRef(null);
@@ -34,7 +33,6 @@ function useDragBlock(path, offset, onDrag) {
 
   return useCallback((e) => {
     if (!onDrag) return;
-    // Only primary button, and not on a contentEditable that's already focused
     if (e.button !== 0) return;
     startMouse.current = { x: e.clientX, y: e.clientY };
     startOffset.current = { ...offset };
@@ -46,7 +44,6 @@ function useDragBlock(path, offset, onDrag) {
       if (!dragging.current && Math.abs(dx) + Math.abs(dy) < 4) return;
       if (!dragging.current) {
         dragging.current = true;
-        // blur any focused editable so we don't accidentally type while dragging
         document.activeElement?.blur();
       }
       onDrag(path, { x: startOffset.current.x + dx, y: startOffset.current.y + dy });
@@ -60,17 +57,16 @@ function useDragBlock(path, offset, onDrag) {
   }, [path, offset, onDrag]);
 }
 
-// Editable span: read-only until double-clicked, saves on blur
-function Editable({ className, value, onSave, multiline = false, style, role }) {
+// Editable span: read-only until double-clicked or Enter/F2, saves on blur
+function Editable({ className, value, onSave, multiline = false, style, role, 'aria-label': ariaLabel }) {
   const [editing, setEditing] = useState(false);
   const ref = useRef(null);
 
   const activate = (e) => {
-    e.stopPropagation(); // prevent block drag starting
+    e.stopPropagation();
     setEditing(true);
     setTimeout(() => {
       ref.current?.focus();
-      // place cursor at end
       const range = document.createRange();
       range.selectNodeContents(ref.current);
       range.collapse(false);
@@ -89,18 +85,25 @@ function Editable({ className, value, onSave, multiline = false, style, role }) 
     if (!multiline && e.key === 'Enter') { e.preventDefault(); e.target.blur(); }
   };
 
+  const handleKeyDownInactive = (e) => {
+    if (e.key === 'Enter' || e.key === 'F2') { e.preventDefault(); activate(e); }
+  };
+
   return (
     <span
       ref={ref}
       className={className}
+      tabIndex={0}
       style={{ ...style, display: 'block', cursor: editing ? 'text' : 'inherit', userSelect: editing ? 'text' : 'none' }}
       contentEditable={editing}
       suppressContentEditableWarning
       role={role || 'textbox'}
       aria-multiline={multiline}
+      aria-label={ariaLabel}
+      aria-readonly={!editing}
       onDoubleClick={activate}
       onBlur={editing ? handleBlur : undefined}
-      onKeyDown={editing ? handleKeyDown : undefined}
+      onKeyDown={editing ? handleKeyDown : handleKeyDownInactive}
       onMouseDown={editing ? (e) => e.stopPropagation() : undefined}
     >
       {value}
@@ -108,28 +111,27 @@ function Editable({ className, value, onSave, multiline = false, style, role }) 
   );
 }
 
-export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit, onDrag, ornaments = { style: 'none', placement: {} }, contentAlign = 'center' }) {
-  if (!menu) return null;
+// ── Ornament components — hoisted so React can memoize across re-renders ──────
 
-  const pack = ORNAMENT_STYLES[ornaments.style] || null;
-  const pl = ornaments.placement || {};
+const OrnSvg = React.memo(function OrnSvg({ pack, slot, className, style: extraStyle = {} }) {
+  if (!pack) return null;
+  const s = pack[slot];
+  if (!s) return null;
+  return (
+    <svg className={className} viewBox={s.viewBox}
+         style={{ color: 'var(--m-accent)', ...extraStyle }}
+         aria-hidden="true">
+      <path d={s.path}
+        fill={s.strokeOnly ? 'none' : 'currentColor'}
+        stroke={s.strokeOnly ? 'currentColor' : 'none'}
+        strokeWidth={s.strokeOnly ? 1.5 : 0} />
+    </svg>
+  );
+});
 
-  const OrnSvg = ({ slot, className, style: extraStyle = {} }) => {
-    if (!pack) return null;
-    const s = pack[slot];
-    if (!s) return null;
-    const fillAttr   = s.strokeOnly ? 'none' : 'currentColor';
-    const strokeAttr = s.strokeOnly ? 'currentColor' : 'none';
-    return (
-      <svg className={className} viewBox={s.viewBox}
-           style={{ color: 'var(--m-accent)', ...extraStyle }}
-           aria-hidden="true">
-        <path d={s.path} fill={fillAttr} stroke={strokeAttr} strokeWidth={s.strokeOnly ? 1.5 : 0} />
-      </svg>
-    );
-  };
-
-  const CornerSet = () => !pack ? null : (
+const CornerSet = React.memo(function CornerSet({ pack }) {
+  if (!pack) return null;
+  return (
     <>
       {[
         { pos: 'tl', transform: 'none' },
@@ -137,36 +139,46 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
         { pos: 'br', transform: 'rotate(180deg)' },
         { pos: 'bl', transform: 'scaleY(-1)' },
       ].map(({ pos, transform }) => (
-        <OrnSvg key={pos} slot="corner"
+        <OrnSvg key={pos} pack={pack} slot="corner"
           className={`ornament-corner ornament-corner--${pos}`}
           style={{ color: 'var(--m-accent)', transform }} />
       ))}
     </>
   );
+});
 
-  const CartoucheFrame = () => {
-    if (!pack || !pl.cartouche) return null;
-    const isLandscape = format === 'a5h' || format === 'bookleth';
-    const c = (isLandscape && pack.cartoucheH) ? pack.cartoucheH : pack.cartouche;
-    return (
-      <svg className="ornament-cartouche" viewBox={c.viewBox}
-           style={{ color: 'var(--m-accent)' }} aria-hidden="true">
-        <path d={c.path} fill="none" stroke="currentColor" strokeWidth="1.5" />
-      </svg>
-    );
-  };
-
-  const OrnamentDivider = () => !pack ? <span className="m-orn">✦</span> : (
-    <OrnSvg slot="divider" className="ornament-divider" />
+const CartoucheFrame = React.memo(function CartoucheFrame({ pack, format, show }) {
+  if (!pack || !show) return null;
+  const isLandscape = format === 'a5h' || format === 'bookleth';
+  const c = (isLandscape && pack.cartoucheH) ? pack.cartoucheH : pack.cartouche;
+  return (
+    <svg className="ornament-cartouche" viewBox={c.viewBox}
+         style={{ color: 'var(--m-accent)' }} aria-hidden="true">
+      <path d={c.path} fill="none" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
   );
+});
 
-  const SectionAccent = () => !pack || !pl.sections ? null : (
-    <OrnSvg slot="sectionAccent" className="ornament-section-accent" />
-  );
+const OrnamentDivider = React.memo(function OrnamentDivider({ pack }) {
+  if (!pack) return <span className="m-orn">✦</span>;
+  return <OrnSvg pack={pack} slot="divider" className="ornament-divider" />;
+});
 
-  const ItemTopRule = () => !pack || !pl.items ? null : (
-    <OrnSvg slot="itemRule" className="ornament-item-rule" />
-  );
+const SectionAccent = React.memo(function SectionAccent({ pack, show }) {
+  if (!pack || !show) return null;
+  return <OrnSvg pack={pack} slot="sectionAccent" className="ornament-section-accent" />;
+});
+
+const ItemTopRule = React.memo(function ItemTopRule({ pack, show }) {
+  if (!pack || !show) return null;
+  return <OrnSvg pack={pack} slot="itemRule" className="ornament-item-rule" />;
+});
+
+export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit, onDrag, ornaments = { style: 'none', placement: {} }, contentAlign = 'center' }) {
+  if (!menu) return null;
+
+  const pack = ORNAMENT_STYLES[ornaments.style] || null;
+  const pl = ornaments.placement || {};
 
   const spec = menu.render_spec || {};
 
@@ -218,7 +230,7 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
     const onMouseDown = useDragBlock(['_layout', 'sections', si, 'cocktails', ci], off, onDrag);
     return (
       <div className="draggable-block m-item" style={{ top: off.y, left: off.x }} onMouseDown={onDrag ? onMouseDown : undefined}>
-        <ItemTopRule />
+        <ItemTopRule pack={pack} show={pl.items} />
         <div className="m-item-head">
           <Editable className="m-name" value={c.name}
             onSave={(v) => edit(['sections', si, 'cocktails', ci, 'name'], v)}
@@ -247,11 +259,11 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
     return (
       <div className="draggable-block" style={{ top: off.y, left: off.x }} onMouseDown={onDrag ? onMouseDown : undefined}>
         <div className="m-section">
-          <SectionAccent />
+          <SectionAccent pack={pack} show={pl.sections} />
           <Editable value={section.title}
             onSave={(v) => edit(['sections', si, 'title'], v)}
             aria-label="Section title" />
-          <SectionAccent />
+          <SectionAccent pack={pack} show={pl.sections} />
         </div>
       </div>
     );
@@ -280,7 +292,7 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
             onSave={(v) => edit(['tagline'], v)} aria-label="Tagline" />
         </div>
         <div className="draggable-block" style={{ top: dOff.y, left: dOff.x }} onMouseDown={onDrag ? onMouseDownDivider : undefined}>
-          <div className="m-divider"><OrnamentDivider /></div>
+          <div className="m-divider"><OrnamentDivider pack={pack} /></div>
         </div>
       </>
     );
@@ -311,7 +323,7 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
     return (
       <div className="m-columns" style={{ columnCount: columns, columnGap: '32px' }}>
         {rows.map((g, gi) => (
-          <div key={gi} style={{ breakInside: 'avoid' }}>
+          <div key={gi}>
             <SectionTitle section={g.section} si={g.si} />
             {g.cocktails.map((b, bi) => (
               <Cocktail key={bi} c={b.c} si={b.si} ci={b.ci} />
@@ -334,8 +346,8 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
           id="menu-sheet"
           style={styleVars}
         >
-          {pl.corners && pack && <CornerSet />}
-          <CartoucheFrame />
+          {pl.corners && pack && <CornerSet pack={pack} />}
+          <CartoucheFrame pack={pack} format={format} show={pl.cartouche} />
           <div className="menu-pad">
             <Cover mini />
             <SectionList />
@@ -373,8 +385,8 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
       <div className="booklet" id="menu-sheet" style={styleVars}>
         {/* Page 1: cover + first batch */}
         <div className={`menu-sheet sheet-a5${pl.cartouche && pack ? ' has-cartouche' : ''}${noBorder ? ' no-border' : ''}`}>
-          {pl.corners && pack && <CornerSet />}
-          <CartoucheFrame />
+          {pl.corners && pack && <CornerSet pack={pack} />}
+          <CartoucheFrame pack={pack} format={format} show={pl.cartouche} />
           <div className="menu-pad">
             <Cover mini />
             <SectionList blocks={coverBlocks} />
@@ -384,7 +396,7 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
         {restPages.map((page, pi) => (
           <div key={pi} className={`menu-sheet sheet-a5${noBorder ? ' no-border' : ''}`}
                style={{ '--m-item-scale': finalItemScaleBooklet }}>
-            {pl.allPages && pack && <CornerSet />}
+            {pl.allPages && pack && <CornerSet pack={pack} />}
             <div className="menu-pad">
               <SectionList blocks={page.blocks} />
             </div>
@@ -393,9 +405,9 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
         {/* Footer page */}
         {menu.note && (
           <div className={`menu-sheet sheet-a5${noBorder ? ' no-border' : ''}`}>
-            {pl.allPages && pack && <CornerSet />}
+            {pl.allPages && pack && <CornerSet pack={pack} />}
             <div className="menu-pad">
-              <div className="m-divider"><OrnamentDivider /></div>
+              <div className="m-divider"><OrnamentDivider pack={pack} /></div>
               <Footer />
             </div>
           </div>
@@ -408,8 +420,8 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
   if (format === 'a5h') {
     return (
       <div className={`menu-sheet sheet-a5h${pl.cartouche && pack ? ' has-cartouche' : ''}${noBorder ? ' no-border' : ''}`} id="menu-sheet" style={styleVars}>
-        {pl.corners && pack && <CornerSet />}
-        <CartoucheFrame />
+        {pl.corners && pack && <CornerSet pack={pack} />}
+        <CartoucheFrame pack={pack} format={format} show={pl.cartouche} />
         <div className="menu-pad-h">
           <div className="menu-col-cover">
             <Cover />
@@ -455,8 +467,8 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
           if (page.type === 'cover') {
             return (
               <div className={`menu-sheet sheet-a5h page-cover-h${pl.cartouche && pack ? ' has-cartouche' : ''}${noBorder ? ' no-border' : ''}`} key={pi}>
-                {pl.corners && pack && <CornerSet />}
-                <CartoucheFrame />
+                {pl.corners && pack && <CornerSet pack={pack} />}
+                <CartoucheFrame pack={pack} format={format} show={pl.cartouche} />
                 <div className="menu-pad-h menu-pad-h-cover">
                   <Cover />
                 </div>
@@ -466,9 +478,9 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
           if (page.type === 'footer') {
             return (
               <div className={`menu-sheet sheet-a5h page-footer-h${noBorder ? ' no-border' : ''}`} key={pi}>
-                {pl.allPages && pack && <CornerSet />}
+                {pl.allPages && pack && <CornerSet pack={pack} />}
                 <div className="menu-pad-h menu-pad-h-cover">
-                  <div className="m-divider"><OrnamentDivider /></div>
+                  <div className="m-divider"><OrnamentDivider pack={pack} /></div>
                   <Footer />
                 </div>
               </div>
@@ -477,7 +489,7 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
           return (
             <div className={`menu-sheet sheet-a5h${noBorder ? ' no-border' : ''}`} key={pi}
                  style={{ '--m-item-scale': finalItemScaleBookletH }}>
-              {pl.allPages && pack && <CornerSet />}
+              {pl.allPages && pack && <CornerSet pack={pack} />}
               <div className="menu-pad">
                 <SectionList blocks={page.blocks} />
               </div>
@@ -518,8 +530,8 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
         if (page.type === 'cover') {
           return (
             <div className={`menu-sheet sheet-booklet page-cover${pl.cartouche && pack ? ' has-cartouche' : ''}${noBorder ? ' no-border' : ''}`} key={pi}>
-              {pl.corners && pack && <CornerSet />}
-              <CartoucheFrame />
+              {pl.corners && pack && <CornerSet pack={pack} />}
+              <CartoucheFrame pack={pack} format={format} show={pl.cartouche} />
               <div className="menu-pad menu-pad-cover"><Cover /></div>
             </div>
           );
@@ -527,9 +539,9 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
         if (page.type === 'footer') {
           return (
             <div className={`menu-sheet sheet-booklet page-footer${noBorder ? ' no-border' : ''}`} key={pi}>
-              {pl.allPages && pack && <CornerSet />}
+              {pl.allPages && pack && <CornerSet pack={pack} />}
               <div className="menu-pad menu-pad-cover">
-                <div className="m-divider"><OrnamentDivider /></div>
+                <div className="m-divider"><OrnamentDivider pack={pack} /></div>
                 <Footer />
               </div>
             </div>
@@ -538,7 +550,7 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
         return (
           <div className={`menu-sheet sheet-booklet${noBorder ? ' no-border' : ''}`} key={pi}
                style={{ '--m-item-scale': finalItemScaleBooklet }}>
-            {pl.allPages && pack && <CornerSet />}
+            {pl.allPages && pack && <CornerSet pack={pack} />}
             <div className="menu-pad">
               <SectionList blocks={page.blocks} />
             </div>
