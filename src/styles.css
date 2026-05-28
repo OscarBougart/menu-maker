@@ -748,7 +748,8 @@ textarea::placeholder, input::placeholder { color: var(--bone-faint); font-style
 /* ── DRAG REPOSITIONING ── */
 .draggable-block { position: relative; cursor: grab; }
 .draggable-block:active { cursor: grabbing; }
-@media print { .draggable-block { cursor: default; } }
+.draggable-block.drag-selected { outline: 1.5px solid var(--brass); outline-offset: 2px; border-radius: 2px; }
+@media print { .draggable-block { cursor: default; } .draggable-block.drag-selected { outline: none; } }
 
 /* ── ORNAMENTS ── */
 .ornament-corner {

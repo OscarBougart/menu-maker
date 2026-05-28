@@ -35,6 +35,7 @@ export default function App() {
     border: true,
   });
   const [contentAlign, setContentAlign] = useState('center');
+  const [selectedKeys, setSelectedKeys] = useState(new Set());
   const [zoom, setZoom] = useState(1);
   const [extracting, setExtracting] = useState(false);
   const [merging, setMerging] = useState(false);
@@ -502,9 +503,9 @@ export default function App() {
         {menu ? (
           <>
             <div className="zoom-wrapper" style={{ transform: `scale(${zoom})`, transformOrigin: 'top center', transition: 'transform 0.2s' }}>
-              <MenuTemplate menu={menu} format={format} columns={columns} onEdit={editMenu} onDrag={editMenu} ornaments={ornaments} contentAlign={contentAlign} />
+              <MenuTemplate menu={menu} format={format} columns={columns} onEdit={editMenu} onDrag={editMenu} ornaments={ornaments} contentAlign={contentAlign} selectedKeys={selectedKeys} onSelectionChange={setSelectedKeys} />
             </div>
-            <div className="edit-hint">Hold and drag to reposition blocks · Double-click text to edit</div>
+            <div className="edit-hint">Hold and drag to reposition · Shift+click to multi-select · Double-click text to edit</div>
             <div className="export-bar">
               <button className="export-btn" onClick={saveAsPDF} disabled={busy}>Save as PDF</button>
               <button className="export-btn" onClick={saveMenu}>Save to /menus</button>
@@ -641,6 +642,33 @@ export default function App() {
                 </div>
               </div>
             </div>
+
+            {(() => {
+              // Show per-item size control when exactly one cocktail is selected
+              if (selectedKeys.size !== 1) return null;
+              const selKey = Array.from(selectedKeys)[0];
+              const m = selKey.match(/^_layout\.sections\.(\d+)\.cocktails\.(\d+)$/);
+              if (!m) return null;
+              const si = +m[1], ci = +m[2];
+              const itemScale = menu._layout?.sections?.[si]?.cocktails?.[ci]?.scale ?? 1;
+              return (
+                <div className="block">
+                  <div className="block-title">Selected Item</div>
+                  <div className="stepper-group">
+                    <span className="src-label">Size</span>
+                    <div className="style-row">
+                      <button className="style-chip"
+                        onClick={() => editMenu(['_layout', 'sections', si, 'cocktails', ci, 'scale'], Math.max(0.5, +(itemScale - 0.05).toFixed(2)))}
+                        aria-label="Smaller item">−</button>
+                      <span className="per-page-num">{Math.round(itemScale * 100)}%</span>
+                      <button className="style-chip"
+                        onClick={() => editMenu(['_layout', 'sections', si, 'cocktails', ci, 'scale'], Math.min(2, +(itemScale + 0.05).toFixed(2)))}
+                        aria-label="Larger item">+</button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             <div className="block">
               <div className="block-title">Content</div>

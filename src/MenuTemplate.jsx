@@ -25,28 +25,43 @@ function getOffset(obj, ...keys) {
   return node || { x: 0, y: 0 };
 }
 
-// Returns mousedown handler that drags the block on hold/move, ignores quick clicks
-function useDragBlock(path, offset, onDrag) {
+// Stable key for a layout path (used for selection set membership)
+function pathKey(path) { return path.join('.'); }
+
+// Returns mousedown handler. Supports group drag when selection context is active.
+function useDragBlock(path, offset, onDrag, getGroupDrags) {
   const startMouse = useRef(null);
   const startOffset = useRef(null);
+  const groupSnapshot = useRef(null); // snapshotted at drag start
   const dragging = useRef(false);
+  const key = pathKey(path);
 
   return useCallback((e) => {
     if (!onDrag) return;
     if (e.button !== 0) return;
+    if (e.shiftKey) return;
     startMouse.current = { x: e.clientX, y: e.clientY };
     startOffset.current = { ...offset };
+    // Snapshot the group at mousedown so offsets don't drift during the drag
+    groupSnapshot.current = getGroupDrags ? getGroupDrags(key) : null;
     dragging.current = false;
 
-    const handleMove = (e) => {
-      const dx = e.clientX - startMouse.current.x;
-      const dy = e.clientY - startMouse.current.y;
+    const handleMove = (mv) => {
+      const dx = mv.clientX - startMouse.current.x;
+      const dy = mv.clientY - startMouse.current.y;
       if (!dragging.current && Math.abs(dx) + Math.abs(dy) < 4) return;
       if (!dragging.current) {
         dragging.current = true;
         document.activeElement?.blur();
       }
-      onDrag(path, { x: startOffset.current.x + dx, y: startOffset.current.y + dy });
+      const group = groupSnapshot.current;
+      if (group && group.length > 0) {
+        group.forEach(({ dragPath, startOff }) => {
+          onDrag(dragPath, { x: startOff.x + dx, y: startOff.y + dy });
+        });
+      } else {
+        onDrag(path, { x: startOffset.current.x + dx, y: startOffset.current.y + dy });
+      }
     };
     const handleUp = () => {
       document.removeEventListener('mousemove', handleMove);
@@ -54,7 +69,7 @@ function useDragBlock(path, offset, onDrag) {
     };
     document.addEventListener('mousemove', handleMove);
     document.addEventListener('mouseup', handleUp);
-  }, [path, offset, onDrag]);
+  }, [path, offset, onDrag, getGroupDrags, key]);
 }
 
 // Editable span: read-only until double-clicked or Enter/F2, saves on blur
@@ -174,8 +189,41 @@ const ItemTopRule = React.memo(function ItemTopRule({ pack, show }) {
   return <OrnSvg pack={pack} slot="itemRule" className="ornament-item-rule" />;
 });
 
-export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit, onDrag, ornaments = { style: 'none', placement: {} }, contentAlign = 'center' }) {
+export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit, onDrag, ornaments = { style: 'none', placement: {} }, contentAlign = 'center', selectedKeys: selectedKeysProp, onSelectionChange }) {
   if (!menu) return null;
+
+  // ── Multi-select state — lifted to App when onSelectionChange is provided ──
+  const [localSelectedKeys, setLocalSelectedKeys] = useState(new Set());
+  const selectedKeys = selectedKeysProp ?? localSelectedKeys;
+  const setSelectedKeys = onSelectionChange ?? setLocalSelectedKeys;
+
+  const toggleSelected = useCallback((key) => {
+    setSelectedKeys(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }, [setSelectedKeys]);
+
+  const clearSelection = useCallback(() => setSelectedKeys(new Set()), [setSelectedKeys]);
+
+  // Registry of all draggable items: key → { path, offset }
+  // Populated by each draggable component on render, read during group drag
+  const dragRegistry = useRef({});
+
+  const registerDraggable = useCallback((key, path, offset) => {
+    dragRegistry.current[key] = { path, offset };
+  }, []);
+
+  // Returns the list of { dragPath, startOff } for all selected items
+  // Only used when this item's key is in the selection set
+  const getGroupDrags = useCallback((key) => {
+    if (!selectedKeys.has(key)) return null;
+    return Array.from(selectedKeys).map(k => {
+      const entry = dragRegistry.current[k];
+      return entry ? { dragPath: entry.path, startOff: { ...entry.offset } } : null;
+    }).filter(Boolean);
+  }, [selectedKeys]);
 
   const pack = ORNAMENT_STYLES[ornaments.style] || null;
   const pl = ornaments.placement || {};
@@ -226,10 +274,24 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
   // ── shared editable + draggable pieces ───────────────────
 
   const Cocktail = ({ c, si, ci }) => {
+    const path = ['_layout', 'sections', si, 'cocktails', ci];
+    const key = pathKey(path);
     const off = getOffset(layout, 'sections', si, 'cocktails', ci);
-    const onMouseDown = useDragBlock(['_layout', 'sections', si, 'cocktails', ci], off, onDrag);
+    const itemScale = layout.sections?.[si]?.cocktails?.[ci]?.scale ?? 1;
+    registerDraggable(key, path, off);
+    const isSelected = selectedKeys.has(key);
+    const onMouseDown = useDragBlock(path, off, onDrag, getGroupDrags);
+    const handleMouseDown = onDrag ? (e) => {
+      if (e.shiftKey) { e.preventDefault(); toggleSelected(key); return; }
+      if (!isSelected) clearSelection();
+      onMouseDown(e);
+    } : undefined;
     return (
-      <div className="draggable-block m-item" style={{ top: off.y, left: off.x }} onMouseDown={onDrag ? onMouseDown : undefined}>
+      <div
+        className={'draggable-block m-item' + (isSelected ? ' drag-selected' : '')}
+        style={{ top: off.y, left: off.x, transform: itemScale !== 1 ? `scale(${itemScale})` : undefined, transformOrigin: 'top left', marginBottom: itemScale !== 1 ? `${(itemScale - 1) * ITEM_H_BASE * finalItemScale}px` : undefined }}
+        onMouseDown={handleMouseDown}
+      >
         <ItemTopRule pack={pack} show={pl.items} />
         <div className="m-item-head">
           <Editable className="m-name" value={c.name}
@@ -254,10 +316,23 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
   };
 
   const SectionTitle = ({ section, si }) => {
+    const path = ['_layout', 'sections', si, 'header'];
+    const key = pathKey(path);
     const off = getOffset(layout, 'sections', si, 'header');
-    const onMouseDown = useDragBlock(['_layout', 'sections', si, 'header'], off, onDrag);
+    registerDraggable(key, path, off);
+    const isSelected = selectedKeys.has(key);
+    const onMouseDown = useDragBlock(path, off, onDrag, getGroupDrags);
+    const handleMouseDown = onDrag ? (e) => {
+      if (e.shiftKey) { e.preventDefault(); toggleSelected(key); return; }
+      if (!isSelected) clearSelection();
+      onMouseDown(e);
+    } : undefined;
     return (
-      <div className="draggable-block" style={{ top: off.y, left: off.x }} onMouseDown={onDrag ? onMouseDown : undefined}>
+      <div
+        className={'draggable-block' + (isSelected ? ' drag-selected' : '')}
+        style={{ top: off.y, left: off.x }}
+        onMouseDown={handleMouseDown}
+      >
         <div className="m-section">
           <SectionAccent pack={pack} show={pl.sections} />
           <Editable value={section.title}
