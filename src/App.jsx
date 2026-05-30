@@ -1,16 +1,7 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import MenuTemplate from './MenuTemplate.jsx';
+import StylePanel from './StylePanel.jsx';
 import { MENU_DEFAULTS, THEME } from './theme.js';
-
-
-const DISPLAY_FONTS = [
-  'Cormorant Garamond', 'Playfair Display', 'EB Garamond',
-  'Cinzel', 'Bodoni Moda', 'DM Serif Display', 'Libre Baskerville',
-];
-const BODY_FONTS = [
-  'Archivo Narrow', 'Jost', 'Inter Tight',
-  'Barlow Condensed', 'DM Sans', 'Outfit',
-];
 
 export default function App() {
   const [imagePreview, setImagePreview] = useState(null);
@@ -36,7 +27,11 @@ export default function App() {
   });
   const [contentAlign, setContentAlign] = useState('center');
   const [selectedKeys, setSelectedKeys] = useState(new Set());
+  const [activeKey, setActiveKey] = useState(null);
+  const [clipboard, setClipboard] = useState(null);
   const [zoom, setZoom] = useState(1);
+  const [history, setHistory] = useState([]);
+  const [future, setFuture] = useState([]);
   const [extracting, setExtracting] = useState(false);
   const [merging, setMerging] = useState(false);
   const [error, setError] = useState(null);
@@ -46,6 +41,7 @@ export default function App() {
   const [dragOver, setDragOver] = useState(false);
   const [showSaveStyle, setShowSaveStyle] = useState(false);
   const fileRef = useRef(null);
+  const menuRef = useRef(menu);
 
   const refreshSources = async () => {
     try {
@@ -67,6 +63,7 @@ export default function App() {
   };
 
   useEffect(() => { refreshSources(); refreshMenus(); }, []);
+  menuRef.current = menu;
   useEffect(() => {
     Object.entries(THEME).forEach(([k, v]) =>
       document.documentElement.style.setProperty(`--${k}`, v)
@@ -93,6 +90,54 @@ export default function App() {
     document.addEventListener('paste', handlePaste);
     return () => document.removeEventListener('paste', handlePaste);
   }, []);
+
+  /* Keyboard shortcuts: undo/redo, delete, copy/paste/duplicate, nudge */
+  useEffect(() => {
+    const isEditingField = (target) => {
+      if (!target) return false;
+      const tag = target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+      // contentEditable that is unlocked (data-locked absent)
+      if (target.isContentEditable && !target.hasAttribute('data-locked')) return true;
+      return false;
+    };
+
+    const handleKey = (e) => {
+      const editing = isEditingField(e.target);
+
+      // Undo / redo
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); return; }
+        if ((e.key === 'y') || (e.key === 'z' && e.shiftKey)) { e.preventDefault(); redo(); return; }
+        if (editing) return;
+        if (e.key === 'c' || e.key === 'C') { if (activeKey) { e.preventDefault(); copyElement(activeKey); } return; }
+        if (e.key === 'v' || e.key === 'V') { if (clipboard) { e.preventDefault(); pasteElement(); } return; }
+        if (e.key === 'd' || e.key === 'D') { if (activeKey) { e.preventDefault(); duplicateElement(activeKey); } return; }
+        return;
+      }
+
+      if (editing) return;
+
+      // Delete selected element
+      if ((e.key === 'Delete' || e.key === 'Backspace') && activeKey) {
+        e.preventDefault();
+        deleteElement(activeKey);
+        return;
+      }
+
+      // Arrow nudge (1px, or 10px with Shift)
+      if (activeKey && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        if (e.key === 'ArrowUp')    nudgeActive(0, -step);
+        if (e.key === 'ArrowDown')  nudgeActive(0, step);
+        if (e.key === 'ArrowLeft')  nudgeActive(-step, 0);
+        if (e.key === 'ArrowRight') nudgeActive(step, 0);
+      }
+    };
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [history, future, menu, activeKey, clipboard]);
 
   /* 1. Upload + extract */
   const onPickFile = (e) => loadImageFile(e.target.files?.[0]);
@@ -176,16 +221,272 @@ export default function App() {
     finally { setBusy(false); }
   };
 
+  const applyEdit = (prev, path, value) => {
+    const next = structuredClone(prev);
+    let node = next;
+    for (let i = 0; i < path.length - 1; i++) {
+      if (node[path[i]] == null) node[path[i]] = typeof path[i + 1] === 'number' ? [] : {};
+      node = node[path[i]];
+    }
+    node[path[path.length - 1]] = value;
+    return next;
+  };
+
+  // Text edits — push a history entry each time
   const editMenu = (path, value) => {
     setMenu((prev) => {
+      setHistory(h => [...h.slice(-49), prev]);
+      setFuture([]);
+      return applyEdit(prev, path, value);
+    });
+  };
+
+  // Drag/resize — mutates silently, no history entry per frame
+  const editMenuSilent = (path, value) => {
+    setMenu((prev) => applyEdit(prev, path, value));
+  };
+
+  // Returns a snapshot of the current menu — call at mousedown, pass result to commitSnapshot
+  const snapshotMenu = useCallback(() => menuRef.current, []);
+
+  // Pushes a pre-captured snapshot into history — call at first actual move
+  const commitSnapshot = useCallback((snapshot) => {
+    setHistory(h => [...h.slice(-49), snapshot]);
+    setFuture([]);
+  }, []);
+
+  const undo = () => {
+    setHistory(h => {
+      if (!h.length) return h;
+      const prev = h[h.length - 1];
+      setFuture(f => [menu, ...f.slice(0, 49)]);
+      setMenu(prev);
+      return h.slice(0, -1);
+    });
+  };
+
+  const redo = () => {
+    setFuture(f => {
+      if (!f.length) return f;
+      const next = f[0];
+      setHistory(h => [...h.slice(-49), menu]);
+      setMenu(next);
+      return f.slice(1);
+    });
+  };
+
+  // Parse a layout key like "_layout.sections.0.cocktails.2" into path segments
+  const parseKey = (key) => key.split('.').map(s => /^\d+$/.test(s) ? +s : s);
+
+  // Read a value at a path (returns undefined if any segment missing)
+  const readPath = (obj, path) => {
+    let n = obj;
+    for (const k of path) { if (n == null) return undefined; n = n[k]; }
+    return n;
+  };
+
+  // Push current menu to history then apply mutator
+  const mutateWithHistory = (mutator) => {
+    setMenu(prev => {
+      if (!prev) return prev;
+      setHistory(h => [...h.slice(-49), prev]);
+      setFuture([]);
       const next = structuredClone(prev);
+      mutator(next);
+      return next;
+    });
+  };
+
+  // Remove element by key. Returns true if removed.
+  const deleteElement = (key) => {
+    if (!key) return;
+    // Cocktails: _layout.sections.<si>.cocktails.<ci>
+    let m = key.match(/^_layout\.sections\.(\d+)\.cocktails\.(\d+)$/);
+    if (m) {
+      const si = +m[1], ci = +m[2];
+      mutateWithHistory(next => {
+        next.sections?.[si]?.cocktails?.splice(ci, 1);
+        next._layout?.sections?.[si]?.cocktails?.splice(ci, 1);
+      });
+      setActiveKey(null);
+      setSelectedKeys(new Set());
+      return;
+    }
+    // Section header: _layout.sections.<si>.header → remove whole section
+    m = key.match(/^_layout\.sections\.(\d+)\.header$/);
+    if (m) {
+      const si = +m[1];
+      mutateWithHistory(next => {
+        next.sections?.splice(si, 1);
+        next._layout?.sections?.splice(si, 1);
+      });
+      setActiveKey(null);
+      setSelectedKeys(new Set());
+      return;
+    }
+    // Cover sub-blocks and footer — clear text content + reset layout
+    m = key.match(/^_layout\.cover\.(kicker|title|tagline|divider)$/);
+    if (m) {
+      const sub = m[1];
+      mutateWithHistory(next => {
+        if (next._layout?.cover) next._layout.cover[sub] = { x: 0, y: 0, scale: 1 };
+        if (sub === 'title') next.bar_name = '';
+        if (sub === 'tagline') next.tagline = '';
+      });
+      setActiveKey(null);
+      return;
+    }
+    if (key === '_layout.footer') {
+      mutateWithHistory(next => {
+        next.note = '';
+        if (next._layout) next._layout.footer = { x: 0, y: 0, scale: 1 };
+      });
+      setActiveKey(null);
+      return;
+    }
+  };
+
+  // Copy: stash element data + layout under its key into clipboard state
+  const copyElement = (key) => {
+    if (!key || !menu) return;
+    const layoutPath = parseKey(key);
+    const layout = readPath(menu, layoutPath);
+    // Determine the data path corresponding to this layout key
+    let dataPath = null;
+    let kind = null;
+    let m = key.match(/^_layout\.sections\.(\d+)\.cocktails\.(\d+)$/);
+    if (m) { kind = 'cocktail'; dataPath = ['sections', +m[1], 'cocktails', +m[2]]; }
+    else if ((m = key.match(/^_layout\.sections\.(\d+)\.header$/))) { kind = 'section'; dataPath = ['sections', +m[1]]; }
+    else if ((m = key.match(/^_layout\.cover\.(kicker|title|tagline|divider)$/))) { kind = 'cover'; dataPath = ['cover', m[1]]; }
+    else if (key === '_layout.footer') { kind = 'footer'; dataPath = ['footer']; }
+    const data = dataPath && kind !== 'cover' && kind !== 'footer' ? structuredClone(readPath(menu, dataPath)) : null;
+    setClipboard({ kind, data, layout: layout ? structuredClone(layout) : null, sourceKey: key });
+  };
+
+  // Paste: insert a copy near the original (offset +20px) and select it
+  const pasteElement = () => {
+    if (!clipboard || !menu) return;
+    const { kind, data, layout, sourceKey } = clipboard;
+    if (kind === 'cocktail') {
+      const m = sourceKey.match(/^_layout\.sections\.(\d+)\.cocktails\.(\d+)$/);
+      if (!m) return;
+      const si = +m[1], ci = +m[2];
+      let newCi = ci + 1;
+      mutateWithHistory(next => {
+        if (!next.sections?.[si]) return;
+        next.sections[si].cocktails = next.sections[si].cocktails || [];
+        next.sections[si].cocktails.splice(newCi, 0, structuredClone(data));
+        if (!next._layout) next._layout = {};
+        if (!next._layout.sections) next._layout.sections = [];
+        if (!next._layout.sections[si]) next._layout.sections[si] = { cocktails: [] };
+        if (!next._layout.sections[si].cocktails) next._layout.sections[si].cocktails = [];
+        const newLayout = layout ? { ...structuredClone(layout) } : { x: 0, y: 0, scale: 1 };
+        newLayout.x = (newLayout.x || 0) + 20;
+        newLayout.y = (newLayout.y || 0) + 20;
+        next._layout.sections[si].cocktails.splice(newCi, 0, newLayout);
+      });
+      const newKey = `_layout.sections.${si}.cocktails.${newCi}`;
+      setActiveKey(newKey);
+      setSelectedKeys(new Set([newKey]));
+      return;
+    }
+    if (kind === 'section') {
+      const m = sourceKey.match(/^_layout\.sections\.(\d+)\.header$/);
+      if (!m) return;
+      const si = +m[1];
+      const newSi = si + 1;
+      mutateWithHistory(next => {
+        if (!next.sections) next.sections = [];
+        next.sections.splice(newSi, 0, structuredClone(data));
+        if (!next._layout) next._layout = {};
+        if (!next._layout.sections) next._layout.sections = [];
+        const srcLayout = next._layout.sections[si] ? structuredClone(next._layout.sections[si]) : { header: { x: 0, y: 0, scale: 1 }, cocktails: [] };
+        if (srcLayout.header) {
+          srcLayout.header.x = (srcLayout.header.x || 0) + 20;
+          srcLayout.header.y = (srcLayout.header.y || 0) + 20;
+        }
+        next._layout.sections.splice(newSi, 0, srcLayout);
+      });
+      const newKey = `_layout.sections.${newSi}.header`;
+      setActiveKey(newKey);
+      setSelectedKeys(new Set([newKey]));
+      return;
+    }
+    // cover/footer — can't truly duplicate; just shift the original
+    if (kind === 'cover' || kind === 'footer') {
+      mutateWithHistory(next => {
+        const path = parseKey(sourceKey);
+        let node = next;
+        for (let i = 0; i < path.length - 1; i++) {
+          if (node[path[i]] == null) node[path[i]] = {};
+          node = node[path[i]];
+        }
+        const existing = node[path[path.length - 1]] || { x: 0, y: 0, scale: 1 };
+        node[path[path.length - 1]] = { ...existing, x: (existing.x || 0) + 20, y: (existing.y || 0) + 20 };
+      });
+    }
+  };
+
+  // Duplicate: copy + paste in one go
+  const duplicateElement = (key) => {
+    if (!key) return;
+    copyElement(key);
+    // paste uses clipboard state which won't be updated until next render — so do it inline
+    const layoutPath = parseKey(key);
+    const layout = readPath(menu, layoutPath);
+    let m = key.match(/^_layout\.sections\.(\d+)\.cocktails\.(\d+)$/);
+    if (m) {
+      const si = +m[1], ci = +m[2];
+      const newCi = ci + 1;
+      mutateWithHistory(next => {
+        if (!next.sections?.[si]) return;
+        const item = structuredClone(next.sections[si].cocktails?.[ci]);
+        if (!item) return;
+        next.sections[si].cocktails.splice(newCi, 0, item);
+        if (!next._layout?.sections?.[si]?.cocktails) return;
+        const newLayout = layout ? { ...structuredClone(layout) } : { x: 0, y: 0, scale: 1 };
+        newLayout.x = (newLayout.x || 0) + 20;
+        newLayout.y = (newLayout.y || 0) + 20;
+        next._layout.sections[si].cocktails.splice(newCi, 0, newLayout);
+      });
+      const newKey = `_layout.sections.${si}.cocktails.${newCi}`;
+      setActiveKey(newKey);
+      setSelectedKeys(new Set([newKey]));
+      return;
+    }
+    m = key.match(/^_layout\.sections\.(\d+)\.header$/);
+    if (m) {
+      const si = +m[1];
+      const newSi = si + 1;
+      mutateWithHistory(next => {
+        if (!next.sections?.[si]) return;
+        next.sections.splice(newSi, 0, structuredClone(next.sections[si]));
+        if (!next._layout?.sections?.[si]) return;
+        const dupLayout = structuredClone(next._layout.sections[si]);
+        if (dupLayout.header) {
+          dupLayout.header.x = (dupLayout.header.x || 0) + 20;
+          dupLayout.header.y = (dupLayout.header.y || 0) + 20;
+        }
+        next._layout.sections.splice(newSi, 0, dupLayout);
+      });
+      const newKey = `_layout.sections.${newSi}.header`;
+      setActiveKey(newKey);
+      setSelectedKeys(new Set([newKey]));
+    }
+  };
+
+  // Nudge active element by (dx, dy) pixels with one history entry
+  const nudgeActive = (dx, dy) => {
+    if (!activeKey || !menu) return;
+    const path = parseKey(activeKey);
+    mutateWithHistory(next => {
       let node = next;
-      for (let i = 0; i < path.length - 1; i++) {
-        if (node[path[i]] == null) node[path[i]] = typeof path[i + 1] === 'number' ? [] : {};
+      for (let i = 0; i < path.length; i++) {
+        if (node[path[i]] == null) node[path[i]] = i === path.length - 1 ? { x: 0, y: 0 } : (typeof path[i + 1] === 'number' ? [] : {});
         node = node[path[i]];
       }
-      node[path[path.length - 1]] = value;
-      return next;
+      node.x = (node.x || 0) + dx;
+      node.y = (node.y || 0) + dy;
     });
   };
 
@@ -203,18 +504,20 @@ export default function App() {
       const { default: html2canvas } = await import('html2canvas');
       const { jsPDF } = await import('jspdf');
 
-      const isLandscape = format === 'a5h' || format === 'bookleth';
+      const isLandscape = format === 'a5h' || format === 'bookleth' || format === 'a6h';
       const orientation = isLandscape ? 'landscape' : 'portrait';
 
       const sheets = el.classList.contains('booklet')
         ? Array.from(el.querySelectorAll('.menu-sheet'))
         : [el];
 
-      const pdf = new jsPDF({ orientation, unit: 'mm', format: 'a5' });
+      const pdfFormat = (format === 'a6' || format === 'a6h') ? 'a6' : 'a5';
+      const pdf = new jsPDF({ orientation, unit: 'mm', format: pdfFormat });
 
       for (let i = 0; i < sheets.length; i++) {
         const sheet = sheets[i];
-        const isSheetLandscape = sheet.classList.contains('sheet-a5h');
+        const isA6Sheet = sheet.classList.contains('sheet-a6') || sheet.classList.contains('sheet-a6h');
+        const isSheetLandscape = sheet.classList.contains('sheet-a5h') || sheet.classList.contains('sheet-a6h');
         const bgColor = getComputedStyle(sheet).getPropertyValue('--m-bg').trim() || '#1a1a1a';
         const canvas = await html2canvas(sheet, {
           scale: 3,
@@ -225,10 +528,10 @@ export default function App() {
         });
         const imgData = canvas.toDataURL('image/png');
         if (i > 0) {
-          pdf.addPage('a5', isSheetLandscape ? 'landscape' : 'portrait');
+          pdf.addPage(isA6Sheet ? 'a6' : 'a5', isSheetLandscape ? 'landscape' : 'portrait');
         }
-        const w = isSheetLandscape ? 210 : 148;
-        const h = isSheetLandscape ? 148 : 210;
+        const w = isSheetLandscape ? (isA6Sheet ? 148 : 210) : (isA6Sheet ? 105 : 148);
+        const h = isSheetLandscape ? (isA6Sheet ? 105 : 148) : (isA6Sheet ? 148 : 210);
         pdf.addImage(imgData, 'PNG', 0, 0, w, h);
       }
 
@@ -407,6 +710,16 @@ export default function App() {
         <div className="block">
           <div className="block-title"><span className="step-num">2</span> Compose</div>
 
+          <label className="src-label">Format</label>
+          <div className="format-toggle format-toggle--compose">
+            <button aria-pressed={format === 'a5'} title="A5 Portrait — single dense page" className={'fmt-btn' + (format === 'a5' ? ' active' : '')} onClick={() => setFormat('a5')}>A5</button>
+            <button aria-pressed={format === 'a5h'} title="A5 Landscape — cover left, drinks right" className={'fmt-btn' + (format === 'a5h' ? ' active' : '')} onClick={() => setFormat('a5h')}>A5 ↔</button>
+            <button aria-pressed={format === 'a6'} title="A6 Portrait — compact card" className={'fmt-btn' + (format === 'a6' ? ' active' : '')} onClick={() => setFormat('a6')}>A6</button>
+            <button aria-pressed={format === 'a6h'} title="A6 Landscape — compact card, cover left, drinks right" className={'fmt-btn' + (format === 'a6h' ? ' active' : '')} onClick={() => setFormat('a6h')}>A6 ↔</button>
+            <button aria-pressed={format === 'booklet'} title="Booklet Portrait — paginated spreads" className={'fmt-btn' + (format === 'booklet' ? ' active' : '')} onClick={() => setFormat('booklet')}>Booklet</button>
+            <button aria-pressed={format === 'bookleth'} title="Booklet Landscape — paginated spreads" className={'fmt-btn' + (format === 'bookleth' ? ' active' : '')} onClick={() => setFormat('bookleth')}>Booklet ↔</button>
+          </div>
+
           <label className="src-label" htmlFor="source-select">Draw rules from</label>
           <select id="source-select" className="src-select" value={selectedSource} onChange={(e) => setSelectedSource(e.target.value)}>
             {sources.master && <option value="master">House Brain (all menus)</option>}
@@ -483,29 +796,27 @@ export default function App() {
         )}
       </aside>
 
-      <main className="canvas">
+      <main className="canvas" onClick={(e) => { if (!e.target.closest('.draggable-block') && !e.target.closest('.floating-toolbar')) { setSelectedKeys(new Set()); setActiveKey(null); } }}>
         <div className="canvas-bar">
           <span className="canvas-label">Menu Preview</span>
+          <div className="undo-controls">
+            <button className="zoom-btn" onClick={undo} disabled={!history.length} aria-label="Undo" title="Undo (Ctrl+Z)">↩</button>
+            <button className="zoom-btn" onClick={redo} disabled={!future.length} aria-label="Redo" title="Redo (Ctrl+Y)">↪</button>
+          </div>
           <div className="zoom-controls">
             <button className="zoom-btn" onClick={() => setZoom(z => Math.max(0.4, +(z - 0.1).toFixed(1)))} aria-label="Zoom out" title="Zoom out">−</button>
             <span className="zoom-label">{Math.round(zoom * 100)}%</span>
             <button className="zoom-btn" onClick={() => setZoom(z => Math.min(2, +(z + 0.1).toFixed(1)))} aria-label="Zoom in" title="Zoom in">+</button>
             <button className="zoom-btn zoom-btn-reset" onClick={() => setZoom(1)} aria-label="Reset zoom" title="Reset zoom">⟳</button>
           </div>
-          <div className="format-toggle">
-            <button aria-pressed={format === 'a5'} title="A5 Portrait — single dense page" className={'fmt-btn' + (format === 'a5' ? ' active' : '')} onClick={() => setFormat('a5')}>A5</button>
-            <button aria-pressed={format === 'a5h'} title="A5 Landscape — cover left, drinks right" className={'fmt-btn' + (format === 'a5h' ? ' active' : '')} onClick={() => setFormat('a5h')}>A5 ↔</button>
-            <button aria-pressed={format === 'booklet'} title="Booklet Portrait — paginated spreads" className={'fmt-btn' + (format === 'booklet' ? ' active' : '')} onClick={() => setFormat('booklet')}>Booklet</button>
-            <button aria-pressed={format === 'bookleth'} title="Booklet Landscape — paginated spreads" className={'fmt-btn' + (format === 'bookleth' ? ' active' : '')} onClick={() => setFormat('bookleth')}>Booklet ↔</button>
-          </div>
         </div>
 
         {menu ? (
           <>
             <div className="zoom-wrapper" style={{ transform: `scale(${zoom})`, transformOrigin: 'top center', transition: 'transform 0.2s' }}>
-              <MenuTemplate menu={menu} format={format} columns={columns} onEdit={editMenu} onDrag={editMenu} ornaments={ornaments} contentAlign={contentAlign} selectedKeys={selectedKeys} onSelectionChange={setSelectedKeys} />
+              <MenuTemplate menu={menu} format={format} columns={columns} onEdit={editMenu} onDrag={editMenuSilent} onSnapshot={snapshotMenu} onCommit={commitSnapshot} ornaments={ornaments} contentAlign={contentAlign} selectedKeys={selectedKeys} onSelectionChange={setSelectedKeys} activeKey={activeKey} onActiveKeyChange={setActiveKey} zoom={zoom} />
             </div>
-            <div className="edit-hint">Hold and drag to reposition · Shift+click to multi-select · Double-click text to edit</div>
+            <div className="edit-hint">Click to select · Drag corners to resize · Drag side bars for width · Double-click text to edit</div>
             <div className="export-bar">
               <button className="export-btn" onClick={saveAsPDF} disabled={busy}>Save as PDF</button>
               <button className="export-btn" onClick={saveMenu}>Save to /menus</button>
@@ -529,223 +840,17 @@ export default function App() {
         )}
       </main>
 
-      <aside className="panel panel-right">
-        <div className="panel-header">
-          <div className="kicker">Menu Style</div>
-          <h2>Style</h2>
-        </div>
-        {menu ? (
-          <>
-            <div className="block">
-              <div className="block-title">Colors</div>
-              <div className="style-row">
-                {[
-                  { key: 'background',   label: 'BG'     },
-                  { key: 'text_primary', label: 'Text'   },
-                  { key: 'accent',       label: 'Accent' },
-                  { key: 'text_muted',   label: 'Muted'  },
-                ].map(({ key, label }) => (
-                  <label key={key} className="color-swatch-wrap" title={label}>
-                    <input type="color" className="color-input"
-                      value={menu.render_spec?.[key] || '#888888'}
-                      onChange={(e) => editMenu(['render_spec', key], e.target.value)}
-                    />
-                    <span className="color-name">{label}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            <div className="block">
-              <div className="block-title">Fonts</div>
-              <span className="src-label">Display</span>
-              <div className="font-grid">
-                {DISPLAY_FONTS.map(f => (
-                  <button key={f}
-                    className={'font-chip' + ((menu.render_spec?.display_font || 'Cormorant Garamond') === f ? ' active' : '')}
-                    aria-pressed={(menu.render_spec?.display_font || 'Cormorant Garamond') === f}
-                    style={{ fontFamily: `'${f}', serif` }}
-                    onClick={() => editMenu(['render_spec', 'display_font'], f)}
-                  >{f}</button>
-                ))}
-              </div>
-              <span className="src-label">Body</span>
-              <div className="font-grid">
-                {BODY_FONTS.map(f => (
-                  <button key={f}
-                    className={'font-chip' + ((menu.render_spec?.body_font || 'Archivo Narrow') === f ? ' active' : '')}
-                    aria-pressed={(menu.render_spec?.body_font || 'Archivo Narrow') === f}
-                    style={{ fontFamily: `'${f}', sans-serif` }}
-                    onClick={() => editMenu(['render_spec', 'body_font'], f)}
-                  >{f}</button>
-                ))}
-              </div>
-            </div>
-
-            <div className="block">
-              <div className="block-title">Layout</div>
-              <span className="src-label">Columns</span>
-              <div className="style-row" style={{ marginBottom: 12 }}>
-                {[1, 2, 3].map((n) => (
-                  <button key={n} aria-pressed={columns === n} className={'style-chip' + (columns === n ? ' active' : '')} onClick={() => setColumns(n)}>{n}</button>
-                ))}
-              </div>
-              <span className="src-label">Alignment</span>
-              <div className="style-row" style={{ marginBottom: 12 }}>
-                {['Left', 'Center', 'Right'].map((label) => {
-                  const value = label.toLowerCase();
-                  return (
-                    <button key={value}
-                      className={'style-chip' + (contentAlign === value ? ' active' : '')}
-                      onClick={() => setContentAlign(value)}
-                      aria-pressed={contentAlign === value}
-                    >{label}</button>
-                  );
-                })}
-              </div>
-              <div className="stepper-row">
-                <div className="stepper-group">
-                  <span className="src-label">Title</span>
-                  <div className="style-row">
-                    <button className="style-chip"
-                      onClick={() => editMenu(['render_spec', 'title_scale'], Math.max(0.4, +((menu.render_spec?.title_scale || 1) - 0.05).toFixed(2)))}
-                      aria-label="Smaller title">−</button>
-                    <span className="per-page-num">{Math.round((menu.render_spec?.title_scale || 1) * 42)}px</span>
-                    <button className="style-chip"
-                      onClick={() => editMenu(['render_spec', 'title_scale'], Math.min(2.5, +((menu.render_spec?.title_scale || 1) + 0.05).toFixed(2)))}
-                      aria-label="Larger title">+</button>
-                  </div>
-                </div>
-                <div className="stepper-group">
-                  <span className="src-label">Cocktails</span>
-                  <div className="style-row">
-                    <button className="style-chip"
-                      onClick={() => editMenu(['render_spec', 'items_per_page'], Math.min(20, (menu.render_spec?.items_per_page || 7) + 1))}
-                      aria-label="Smaller cocktails">−</button>
-                    <span className="per-page-num">{Math.round(19 * 553 / ((menu.render_spec?.items_per_page || 7) * 81))}px</span>
-                    <button className="style-chip"
-                      onClick={() => editMenu(['render_spec', 'items_per_page'], Math.max(3, (menu.render_spec?.items_per_page || 7) - 1))}
-                      aria-label="Larger cocktails">+</button>
-                  </div>
-                </div>
-              </div>
-              <div className="stepper-group" style={{ marginTop: 12 }}>
-                <span className="src-label">Spacing</span>
-                <div className="style-row">
-                  <button className="style-chip"
-                    onClick={() => editMenu(['render_spec', 'line_height'], Math.max(0.8, +((menu.render_spec?.line_height || 1.5) - 0.05).toFixed(2)))}
-                    aria-label="Tighter spacing">−</button>
-                  <span className="per-page-num">{(menu.render_spec?.line_height || 1.5).toFixed(1)}</span>
-                  <button className="style-chip"
-                    onClick={() => editMenu(['render_spec', 'line_height'], Math.min(3, +((menu.render_spec?.line_height || 1.5) + 0.05).toFixed(2)))}
-                    aria-label="Looser spacing">+</button>
-                </div>
-              </div>
-            </div>
-
-            {(() => {
-              // Show per-item size control when exactly one cocktail is selected
-              if (selectedKeys.size !== 1) return null;
-              const selKey = Array.from(selectedKeys)[0];
-              const m = selKey.match(/^_layout\.sections\.(\d+)\.cocktails\.(\d+)$/);
-              if (!m) return null;
-              const si = +m[1], ci = +m[2];
-              const itemScale = menu._layout?.sections?.[si]?.cocktails?.[ci]?.scale ?? 1;
-              return (
-                <div className="block">
-                  <div className="block-title">Selected Item</div>
-                  <div className="stepper-group">
-                    <span className="src-label">Size</span>
-                    <div className="style-row">
-                      <button className="style-chip"
-                        onClick={() => editMenu(['_layout', 'sections', si, 'cocktails', ci, 'scale'], Math.max(0.5, +(itemScale - 0.05).toFixed(2)))}
-                        aria-label="Smaller item">−</button>
-                      <span className="per-page-num">{Math.round(itemScale * 100)}%</span>
-                      <button className="style-chip"
-                        onClick={() => editMenu(['_layout', 'sections', si, 'cocktails', ci, 'scale'], Math.min(2, +(itemScale + 0.05).toFixed(2)))}
-                        aria-label="Larger item">+</button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })()}
-
-            <div className="block">
-              <div className="block-title">Content</div>
-              <div className="style-row">
-                {[
-                  { key: 'show_ingredients', label: 'Ingredients' },
-                  { key: 'show_prices',      label: 'Prices'      },
-                ].map(({ key, label }) => {
-                  const on = menu.render_spec?.[key] !== false;
-                  return (
-                    <button key={key}
-                      className={'style-chip toggle-chip' + (on ? ' active' : '')}
-                      onClick={() => editMenu(['render_spec', key], !on)}
-                      aria-pressed={on}
-                    >{label}</button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="block">
-              <div className="block-title">Ornaments</div>
-              <div className="style-row" style={{ marginBottom: 10 }}>
-                <button
-                  className={'style-chip toggle-chip' + (ornaments.border ? ' active' : '')}
-                  onClick={() => setOrnaments(o => ({ ...o, border: !o.border }))}
-                  aria-pressed={ornaments.border}
-                >Border frame</button>
-              </div>
-              <span className="src-label">Style</span>
-              <select className="src-select"
-                value={ornaments.style}
-                onChange={(e) => setOrnaments(o => ({ ...o, style: e.target.value }))}>
-                <option value="none">None</option>
-                <option value="baroque">Baroque</option>
-                <option value="art_nouveau">Art Nouveau</option>
-                <option value="victorian">Victorian</option>
-                <option value="minimal">Minimal</option>
-                <option value="art_deco">Art Deco</option>
-                <option value="gothic">Gothic</option>
-                <option value="neoclassical">Neoclassical</option>
-                <option value="celtic">Celtic</option>
-                <option value="japanese">Japanese</option>
-                <option value="hairline">Hairline</option>
-                <option value="bauhaus">Bauhaus</option>
-              </select>
-              {ornaments.style !== 'none' && (
-                <>
-                  <span className="src-label" style={{ marginTop: 10 }}>Placement</span>
-                  <div className="placement-grid">
-                    {[
-                      { key: 'corners',   label: 'Corners'   },
-                      { key: 'cartouche', label: 'Cartouche' },
-                      { key: 'allPages',  label: 'All pages' },
-                      { key: 'sections',  label: 'Sections'  },
-                      { key: 'items',     label: 'Items'     },
-                    ].map(({ key, label }) => {
-                      const on = ornaments.placement[key];
-                      return (
-                        <button key={key}
-                          className={'style-chip toggle-chip' + (on ? ' active' : '')}
-                          onClick={() => setOrnaments(o => ({
-                            ...o, placement: { ...o.placement, [key]: !on }
-                          }))}
-                          aria-pressed={on}
-                        >{label}</button>
-                      );
-                    })}
-                  </div>
-                </>
-              )}
-            </div>
-          </>
-        ) : (
-          <div className="panel-empty">Generate a menu to adjust its style.</div>
-        )}
-      </aside>
+      <StylePanel
+        menu={menu}
+        columns={columns}
+        contentAlign={contentAlign}
+        ornaments={ornaments}
+        selectedKeys={selectedKeys}
+        onEditMenu={editMenu}
+        onSetColumns={setColumns}
+        onSetContentAlign={setContentAlign}
+        onSetOrnaments={setOrnaments}
+      />
     </div>
   );
 }
