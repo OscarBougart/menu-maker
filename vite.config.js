@@ -3,14 +3,6 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
-  server: {
-    port: 5173,
-    proxy: {
-      // Anything hitting /api goes to the local Express server holding your key
-      '/api': {
-        target: 'http://localhost:8787',
-        changeOrigin: true,
-      },
-    },
-  },
+  // In dev, `vercel dev` runs the Vite server and the /api serverless
+  // functions together, so no manual proxy is needed here.
 });

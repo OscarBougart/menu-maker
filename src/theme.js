@@ -8,23 +8,23 @@
 
 export const THEME = {
   // ── Sidebar panels ──────────────────────────────
-  'panel-bg':         '#0f2940',   // main panel background
-  'panel-bg-deep':    '#0a1f33',   // deeper panel / sub-blocks
-  'panel-text':       '#e8f0f8',   // primary text on panels
-  'panel-text-dim':   '#8aaac8',   // secondary text on panels
-  'panel-text-faint': '#4d6e88',   // faint / placeholder text on panels
+  'panel-bg':         '#102236',   // main panel background
+  'panel-bg-deep':    '#091b2c',   // deeper panel / sub-blocks
+  'panel-text':       '#d0e4f5',   // primary text on panels
+  'panel-text-dim':   '#7aaec6',   // secondary text on panels
+  'panel-text-faint': '#527d97',   // faint / placeholder text on panels
 
-  // ── Canvas (center work area) ───────────────────
-  'canvas-bg':        '#f7f9fc',   // canvas background
-  'canvas-text':      '#0f2940',   // primary text on canvas
-  'canvas-text-dim':  '#3d6080',   // secondary text on canvas
-  'canvas-text-faint':'#4d6e88',   // faint text on canvas
-  'canvas-border':    '#3d6080',   // borders / dividers on canvas
+  // ── Canvas (center work area — dark printing surface) ──
+  'canvas-bg':        '#0d1920',   // dark canvas: menus pop regardless of paper color
+  'canvas-text':      '#adc8de',   // primary text on canvas
+  'canvas-text-dim':  '#5e8daa',   // secondary text on canvas
+  'canvas-text-faint':'#3a6280',   // faint text on canvas
+  'canvas-border':    '#1d3a50',   // borders / dividers on canvas
 
   // ── Accent ──────────────────────────────────────
-  'accent':           '#3b8bbc',   // primary accent (buttons, focus, icons)
-  'accent-bright':    '#62b8f0',   // hover / brighter accent
-  'chrome':           '#6a90aa',   // neutral icon / label color
+  'accent':           '#1e7eb5',   // ink blue — specific, not generic SaaS
+  'accent-bright':    '#45a8d8',   // hover / brighter accent
+  'chrome':           '#5a8da8',   // neutral icon / label color
 
   // ── Menu sheet defaults ─────────────────────────
   'menu-bg':          '#ffffff',   // menu paper background

@@ -1,16 +1,26 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import MenuTemplate from './MenuTemplate.jsx';
+import StylePanel from './StylePanel.jsx';
 import { MENU_DEFAULTS, THEME } from './theme.js';
+import * as store from './storage.js';
 
+// Label a palette object's hexes with their source menu (for seeding the master).
+function labelPalette(palette, source) {
+  if (!palette) return [];
+  return Object.entries(palette)
+    .filter(([, v]) => v)
+    .map(([role, hex]) => ({ role, hex, source }));
+}
 
-const DISPLAY_FONTS = [
-  'Cormorant Garamond', 'Playfair Display', 'EB Garamond',
-  'Cinzel', 'Bodoni Moda', 'DM Serif Display', 'Libre Baskerville',
-];
-const BODY_FONTS = [
-  'Archivo Narrow', 'Jost', 'Inter Tight',
-  'Barlow Condensed', 'DM Sans', 'Outfit',
-];
+// Read a File as a base64 string (no data: prefix) for the API.
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
 export default function App() {
   const [imagePreview, setImagePreview] = useState(null);
@@ -29,6 +39,18 @@ export default function App() {
   const [masterInfo, setMasterInfo] = useState(null);
   const [savedMenus, setSavedMenus] = useState([]);
   const [columns, setColumns] = useState(1);
+  const [ornaments, setOrnaments] = useState({
+    style: 'none',
+    placement: { corners: true, cartouche: false, allPages: false, sections: true, items: false },
+    border: true,
+  });
+  const [contentAlign, setContentAlign] = useState('center');
+  const [selectedKeys, setSelectedKeys] = useState(new Set());
+  const [activeKey, setActiveKey] = useState(null);
+  const [clipboard, setClipboard] = useState(null);
+  const [zoom, setZoom] = useState(1);
+  const [history, setHistory] = useState([]);
+  const [future, setFuture] = useState([]);
   const [extracting, setExtracting] = useState(false);
   const [merging, setMerging] = useState(false);
   const [error, setError] = useState(null);
@@ -36,28 +58,22 @@ export default function App() {
   const [printHint, setPrintHint] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [dragOver, setDragOver] = useState(false);
+  const [showSaveStyle, setShowSaveStyle] = useState(false);
   const fileRef = useRef(null);
+  const menuRef = useRef(menu);
 
-  const refreshSources = async () => {
-    try {
-      const res = await fetch('/api/list-rules');
-      const data = await res.json();
-      setSources(data);
-      if (data.master) {
-        const m = await (await fetch('/api/load-rules/_master')).json();
-        setMasterInfo(m);
-      }
-    } catch { /* server not up yet */ }
+  const refreshSources = () => {
+    const data = store.listRules();
+    setSources(data);
+    if (data.master) setMasterInfo(store.loadMaster());
   };
 
-  const refreshMenus = async () => {
-    try {
-      const data = await (await fetch('/api/list-menus')).json();
-      setSavedMenus(data);
-    } catch { /* server not up yet */ }
+  const refreshMenus = () => {
+    setSavedMenus(store.listMenus());
   };
 
   useEffect(() => { refreshSources(); refreshMenus(); }, []);
+  menuRef.current = menu;
   useEffect(() => {
     Object.entries(THEME).forEach(([k, v]) =>
       document.documentElement.style.setProperty(`--${k}`, v)
@@ -85,6 +101,54 @@ export default function App() {
     return () => document.removeEventListener('paste', handlePaste);
   }, []);
 
+  /* Keyboard shortcuts: undo/redo, delete, copy/paste/duplicate, nudge */
+  useEffect(() => {
+    const isEditingField = (target) => {
+      if (!target) return false;
+      const tag = target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+      // contentEditable that is unlocked (data-locked absent)
+      if (target.isContentEditable && !target.hasAttribute('data-locked')) return true;
+      return false;
+    };
+
+    const handleKey = (e) => {
+      const editing = isEditingField(e.target);
+
+      // Undo / redo
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); return; }
+        if ((e.key === 'y') || (e.key === 'z' && e.shiftKey)) { e.preventDefault(); redo(); return; }
+        if (editing) return;
+        if (e.key === 'c' || e.key === 'C') { if (activeKey) { e.preventDefault(); copyElement(activeKey); } return; }
+        if (e.key === 'v' || e.key === 'V') { if (clipboard) { e.preventDefault(); pasteElement(); } return; }
+        if (e.key === 'd' || e.key === 'D') { if (activeKey) { e.preventDefault(); duplicateElement(activeKey); } return; }
+        return;
+      }
+
+      if (editing) return;
+
+      // Delete selected element
+      if ((e.key === 'Delete' || e.key === 'Backspace') && activeKey) {
+        e.preventDefault();
+        deleteElement(activeKey);
+        return;
+      }
+
+      // Arrow nudge (1px, or 10px with Shift)
+      if (activeKey && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        if (e.key === 'ArrowUp')    nudgeActive(0, -step);
+        if (e.key === 'ArrowDown')  nudgeActive(0, step);
+        if (e.key === 'ArrowLeft')  nudgeActive(-step, 0);
+        if (e.key === 'ArrowRight') nudgeActive(step, 0);
+      }
+    };
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [history, future, menu, activeKey, clipboard]);
+
   /* 1. Upload + extract */
   const onPickFile = (e) => loadImageFile(e.target.files?.[0]);
 
@@ -96,12 +160,15 @@ export default function App() {
     if (!imageFile) return;
     setExtracting(true); setBusy(true); setError(null); setStatus('Extracting design rules…');
     try {
-      const fd = new FormData();
-      fd.append('image', imageFile);
-      const res = await fetch('/api/extract-rules', { method: 'POST', body: fd });
+      const imageBase64 = await fileToBase64(imageFile);
+      const res = await fetch('/api/extract-rules', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64, mediaType: imageFile.type || 'image/jpeg' }),
+      });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setRules(data);
+      setShowSaveStyle(false);
       setStatus('Design rules extracted');
     } catch (err) { setError(err.message); setStatus('Error: ' + err.message); }
     finally { setBusy(false); setExtracting(false); }
@@ -113,10 +180,7 @@ export default function App() {
     const name = (refName || rules.aesthetic_summary?.slice(0, 24) || 'untitled').trim();
     setBusy(true);
     try {
-      await fetch('/api/save-rules', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, rules }),
-      });
+      store.saveRules(name, rules);
       setStatus('Saved "' + name + '" template');
       refreshSources();
     } catch (err) { setError(err.message); setStatus('Error: ' + err.message); }
@@ -129,14 +193,37 @@ export default function App() {
     const name = (refName || rules.aesthetic_summary?.slice(0, 24) || 'a menu').trim();
     setBusy(true); setMerging(true); setError(null); setStatus('Merging into House Brain…');
     try {
+      const existing = store.loadMaster();
+
+      // First menu ever — seed the master directly, no AI reconciliation needed.
+      if (!existing) {
+        const seeded = {
+          aesthetic_summary: rules.aesthetic_summary,
+          source_menus: [name],
+          palette_library: labelPalette(rules.palette, name),
+          typography_options: rules.typography ? [{ from: name, ...rules.typography }] : [],
+          layout_principles: rules.layout ? [{ from: name, ...rules.layout }] : [],
+          copy_voice: rules.copy_voice ? [{ from: name, voice: rules.copy_voice }] : [],
+          decorative_elements: rules.decorative_elements ? [{ from: name, notes: rules.decorative_elements }] : [],
+          design_rules: (rules.design_rules || []).map((r) => ({ rule: r, sources: [name] })),
+          divergences: [],
+        };
+        store.saveMaster(seeded);
+        setMasterInfo(seeded);
+        setStatus('House Brain created');
+        refreshSources();
+        return;
+      }
+
       const res = await fetch('/api/merge-master', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, newRules: rules }),
+        body: JSON.stringify({ name, newRules: rules, existing }),
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
+      store.saveMaster(data.master);
       setMasterInfo(data.master);
-      setStatus(data.seeded ? 'House Brain created' : 'Merged into House Brain — ' + name);
+      setStatus('Merged into House Brain — ' + name);
       refreshSources();
     } catch (err) { setError(err.message); setStatus('Error: ' + err.message); }
     finally { setBusy(false); setMerging(false); }
@@ -150,9 +237,9 @@ export default function App() {
     try {
       let sourceRules = rules || {};
       if (selectedSource === 'master' && sources.master) {
-        sourceRules = await (await fetch('/api/load-rules/_master')).json();
+        sourceRules = store.loadMaster() || sourceRules;
       } else if (selectedSource && selectedSource !== 'current' && selectedSource !== 'master') {
-        sourceRules = await (await fetch('/api/load-rules/' + selectedSource)).json();
+        sourceRules = store.loadRules(selectedSource) || sourceRules;
       }
       const res = await fetch('/api/generate-menu', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -166,40 +253,349 @@ export default function App() {
     finally { setBusy(false); }
   };
 
+  const applyEdit = (prev, path, value) => {
+    const next = structuredClone(prev);
+    let node = next;
+    for (let i = 0; i < path.length - 1; i++) {
+      if (node[path[i]] == null) node[path[i]] = typeof path[i + 1] === 'number' ? [] : {};
+      node = node[path[i]];
+    }
+    node[path[path.length - 1]] = value;
+    return next;
+  };
+
+  // Text edits — push a history entry each time
   const editMenu = (path, value) => {
     setMenu((prev) => {
+      setHistory(h => [...h.slice(-49), prev]);
+      setFuture([]);
+      return applyEdit(prev, path, value);
+    });
+  };
+
+  // Drag/resize — mutates silently, no history entry per frame
+  const editMenuSilent = (path, value) => {
+    setMenu((prev) => applyEdit(prev, path, value));
+  };
+
+  // Returns a snapshot of the current menu — call at mousedown, pass result to commitSnapshot
+  const snapshotMenu = useCallback(() => menuRef.current, []);
+
+  // Pushes a pre-captured snapshot into history — call at first actual move
+  const commitSnapshot = useCallback((snapshot) => {
+    setHistory(h => [...h.slice(-49), snapshot]);
+    setFuture([]);
+  }, []);
+
+  const undo = () => {
+    setHistory(h => {
+      if (!h.length) return h;
+      const prev = h[h.length - 1];
+      setFuture(f => [menu, ...f.slice(0, 49)]);
+      setMenu(prev);
+      return h.slice(0, -1);
+    });
+  };
+
+  const redo = () => {
+    setFuture(f => {
+      if (!f.length) return f;
+      const next = f[0];
+      setHistory(h => [...h.slice(-49), menu]);
+      setMenu(next);
+      return f.slice(1);
+    });
+  };
+
+  // Parse a layout key like "_layout.sections.0.cocktails.2" into path segments
+  const parseKey = (key) => key.split('.').map(s => /^\d+$/.test(s) ? +s : s);
+
+  // Read a value at a path (returns undefined if any segment missing)
+  const readPath = (obj, path) => {
+    let n = obj;
+    for (const k of path) { if (n == null) return undefined; n = n[k]; }
+    return n;
+  };
+
+  // Push current menu to history then apply mutator
+  const mutateWithHistory = (mutator) => {
+    setMenu(prev => {
+      if (!prev) return prev;
+      setHistory(h => [...h.slice(-49), prev]);
+      setFuture([]);
       const next = structuredClone(prev);
-      let node = next;
-      for (let i = 0; i < path.length - 1; i++) {
-        if (node[path[i]] == null) node[path[i]] = typeof path[i + 1] === 'number' ? [] : {};
-        node = node[path[i]];
-      }
-      node[path[path.length - 1]] = value;
+      mutator(next);
       return next;
     });
   };
 
+  // Remove element by key. Returns true if removed.
+  const deleteElement = (key) => {
+    if (!key) return;
+    if (readPath(menu, parseKey(key))?.locked) return;
+    // Cocktails: _layout.sections.<si>.cocktails.<ci>
+    let m = key.match(/^_layout\.sections\.(\d+)\.cocktails\.(\d+)$/);
+    if (m) {
+      const si = +m[1], ci = +m[2];
+      mutateWithHistory(next => {
+        next.sections?.[si]?.cocktails?.splice(ci, 1);
+        next._layout?.sections?.[si]?.cocktails?.splice(ci, 1);
+      });
+      setActiveKey(null);
+      setSelectedKeys(new Set());
+      return;
+    }
+    // Section header: _layout.sections.<si>.header → remove whole section
+    m = key.match(/^_layout\.sections\.(\d+)\.header$/);
+    if (m) {
+      const si = +m[1];
+      mutateWithHistory(next => {
+        next.sections?.splice(si, 1);
+        next._layout?.sections?.splice(si, 1);
+      });
+      setActiveKey(null);
+      setSelectedKeys(new Set());
+      return;
+    }
+    // Cover sub-blocks and footer — clear text content + reset layout
+    m = key.match(/^_layout\.cover\.(kicker|title|tagline|divider)$/);
+    if (m) {
+      const sub = m[1];
+      mutateWithHistory(next => {
+        if (next._layout?.cover) next._layout.cover[sub] = { x: 0, y: 0, scale: 1 };
+        if (sub === 'title') next.bar_name = '';
+        if (sub === 'tagline') next.tagline = '';
+      });
+      setActiveKey(null);
+      return;
+    }
+    if (key === '_layout.footer') {
+      mutateWithHistory(next => {
+        next.note = '';
+        if (next._layout) next._layout.footer = { x: 0, y: 0, scale: 1 };
+      });
+      setActiveKey(null);
+      return;
+    }
+  };
+
+  // Copy: stash element data + layout under its key into clipboard state
+  const copyElement = (key) => {
+    if (!key || !menu) return;
+    const layoutPath = parseKey(key);
+    const layout = readPath(menu, layoutPath);
+    // Determine the data path corresponding to this layout key
+    let dataPath = null;
+    let kind = null;
+    let m = key.match(/^_layout\.sections\.(\d+)\.cocktails\.(\d+)$/);
+    if (m) { kind = 'cocktail'; dataPath = ['sections', +m[1], 'cocktails', +m[2]]; }
+    else if ((m = key.match(/^_layout\.sections\.(\d+)\.header$/))) { kind = 'section'; dataPath = ['sections', +m[1]]; }
+    else if ((m = key.match(/^_layout\.cover\.(kicker|title|tagline|divider)$/))) { kind = 'cover'; dataPath = ['cover', m[1]]; }
+    else if (key === '_layout.footer') { kind = 'footer'; dataPath = ['footer']; }
+    const data = dataPath && kind !== 'cover' && kind !== 'footer' ? structuredClone(readPath(menu, dataPath)) : null;
+    setClipboard({ kind, data, layout: layout ? structuredClone(layout) : null, sourceKey: key });
+  };
+
+  // Paste: insert a copy near the original (offset +20px) and select it
+  const pasteElement = () => {
+    if (!clipboard || !menu) return;
+    const { kind, data, layout, sourceKey } = clipboard;
+    if (kind === 'cocktail') {
+      const m = sourceKey.match(/^_layout\.sections\.(\d+)\.cocktails\.(\d+)$/);
+      if (!m) return;
+      const si = +m[1], ci = +m[2];
+      let newCi = ci + 1;
+      mutateWithHistory(next => {
+        if (!next.sections?.[si]) return;
+        next.sections[si].cocktails = next.sections[si].cocktails || [];
+        next.sections[si].cocktails.splice(newCi, 0, structuredClone(data));
+        if (!next._layout) next._layout = {};
+        if (!next._layout.sections) next._layout.sections = [];
+        if (!next._layout.sections[si]) next._layout.sections[si] = { cocktails: [] };
+        if (!next._layout.sections[si].cocktails) next._layout.sections[si].cocktails = [];
+        const newLayout = layout ? { ...structuredClone(layout) } : { x: 0, y: 0, scale: 1 };
+        newLayout.x = (newLayout.x || 0) + 20;
+        newLayout.y = (newLayout.y || 0) + 20;
+        next._layout.sections[si].cocktails.splice(newCi, 0, newLayout);
+      });
+      const newKey = `_layout.sections.${si}.cocktails.${newCi}`;
+      setActiveKey(newKey);
+      setSelectedKeys(new Set([newKey]));
+      return;
+    }
+    if (kind === 'section') {
+      const m = sourceKey.match(/^_layout\.sections\.(\d+)\.header$/);
+      if (!m) return;
+      const si = +m[1];
+      const newSi = si + 1;
+      mutateWithHistory(next => {
+        if (!next.sections) next.sections = [];
+        next.sections.splice(newSi, 0, structuredClone(data));
+        if (!next._layout) next._layout = {};
+        if (!next._layout.sections) next._layout.sections = [];
+        const srcLayout = next._layout.sections[si] ? structuredClone(next._layout.sections[si]) : { header: { x: 0, y: 0, scale: 1 }, cocktails: [] };
+        if (srcLayout.header) {
+          srcLayout.header.x = (srcLayout.header.x || 0) + 20;
+          srcLayout.header.y = (srcLayout.header.y || 0) + 20;
+        }
+        next._layout.sections.splice(newSi, 0, srcLayout);
+      });
+      const newKey = `_layout.sections.${newSi}.header`;
+      setActiveKey(newKey);
+      setSelectedKeys(new Set([newKey]));
+      return;
+    }
+    // cover/footer — can't truly duplicate; just shift the original
+    if (kind === 'cover' || kind === 'footer') {
+      mutateWithHistory(next => {
+        const path = parseKey(sourceKey);
+        let node = next;
+        for (let i = 0; i < path.length - 1; i++) {
+          if (node[path[i]] == null) node[path[i]] = {};
+          node = node[path[i]];
+        }
+        const existing = node[path[path.length - 1]] || { x: 0, y: 0, scale: 1 };
+        node[path[path.length - 1]] = { ...existing, x: (existing.x || 0) + 20, y: (existing.y || 0) + 20 };
+      });
+    }
+  };
+
+  // Duplicate: copy + paste in one go
+  const duplicateElement = (key) => {
+    if (!key) return;
+    copyElement(key);
+    // paste uses clipboard state which won't be updated until next render — so do it inline
+    const layoutPath = parseKey(key);
+    const layout = readPath(menu, layoutPath);
+    let m = key.match(/^_layout\.sections\.(\d+)\.cocktails\.(\d+)$/);
+    if (m) {
+      const si = +m[1], ci = +m[2];
+      const newCi = ci + 1;
+      mutateWithHistory(next => {
+        if (!next.sections?.[si]) return;
+        const item = structuredClone(next.sections[si].cocktails?.[ci]);
+        if (!item) return;
+        next.sections[si].cocktails.splice(newCi, 0, item);
+        if (!next._layout?.sections?.[si]?.cocktails) return;
+        const newLayout = layout ? { ...structuredClone(layout) } : { x: 0, y: 0, scale: 1 };
+        newLayout.x = (newLayout.x || 0) + 20;
+        newLayout.y = (newLayout.y || 0) + 20;
+        next._layout.sections[si].cocktails.splice(newCi, 0, newLayout);
+      });
+      const newKey = `_layout.sections.${si}.cocktails.${newCi}`;
+      setActiveKey(newKey);
+      setSelectedKeys(new Set([newKey]));
+      return;
+    }
+    m = key.match(/^_layout\.sections\.(\d+)\.header$/);
+    if (m) {
+      const si = +m[1];
+      const newSi = si + 1;
+      mutateWithHistory(next => {
+        if (!next.sections?.[si]) return;
+        next.sections.splice(newSi, 0, structuredClone(next.sections[si]));
+        if (!next._layout?.sections?.[si]) return;
+        const dupLayout = structuredClone(next._layout.sections[si]);
+        if (dupLayout.header) {
+          dupLayout.header.x = (dupLayout.header.x || 0) + 20;
+          dupLayout.header.y = (dupLayout.header.y || 0) + 20;
+        }
+        next._layout.sections.splice(newSi, 0, dupLayout);
+      });
+      const newKey = `_layout.sections.${newSi}.header`;
+      setActiveKey(newKey);
+      setSelectedKeys(new Set([newKey]));
+    }
+  };
+
+  // Nudge active element by (dx, dy) pixels with one history entry
+  const nudgeActive = (dx, dy) => {
+    if (!activeKey || !menu) return;
+    const path = parseKey(activeKey);
+    if (readPath(menu, path)?.locked) return;
+    mutateWithHistory(next => {
+      let node = next;
+      for (let i = 0; i < path.length; i++) {
+        if (node[path[i]] == null) node[path[i]] = i === path.length - 1 ? { x: 0, y: 0 } : (typeof path[i + 1] === 'number' ? [] : {});
+        node = node[path[i]];
+      }
+      node.x = (node.x || 0) + dx;
+      node.y = (node.y || 0) + dy;
+    });
+  };
+
   const exportPDF = () => { setPrintHint(true); window.print(); };
-  const saveMenu = async () => {
+
+  const saveAsPDF = async () => {
+    const el = document.getElementById('menu-sheet');
+    if (!el) return;
+    setBusy(true);
+    setStatus('Generating PDF…');
+    try {
+      // Wait for all fonts (Google Fonts) to finish loading before capture
+      await document.fonts.ready;
+
+      const { default: html2canvas } = await import('html2canvas');
+      const { jsPDF } = await import('jspdf');
+
+      const isLandscape = format === 'a5h' || format === 'bookleth' || format === 'a6h';
+      const orientation = isLandscape ? 'landscape' : 'portrait';
+
+      const sheets = el.classList.contains('booklet')
+        ? Array.from(el.querySelectorAll('.menu-sheet'))
+        : [el];
+
+      const pdfFormat = (format === 'a6' || format === 'a6h') ? 'a6' : 'a5';
+      const pdf = new jsPDF({ orientation, unit: 'mm', format: pdfFormat });
+
+      for (let i = 0; i < sheets.length; i++) {
+        const sheet = sheets[i];
+        const isA6Sheet = sheet.classList.contains('sheet-a6') || sheet.classList.contains('sheet-a6h');
+        const isSheetLandscape = sheet.classList.contains('sheet-a5h') || sheet.classList.contains('sheet-a6h');
+        const bgColor = getComputedStyle(sheet).getPropertyValue('--m-bg').trim() || '#1a1a1a';
+        const canvas = await html2canvas(sheet, {
+          scale: 3,
+          useCORS: true,
+          allowTaint: true,
+          logging: false,
+          backgroundColor: bgColor,
+        });
+        const imgData = canvas.toDataURL('image/png');
+        if (i > 0) {
+          pdf.addPage(isA6Sheet ? 'a6' : 'a5', isSheetLandscape ? 'landscape' : 'portrait');
+        }
+        const w = isSheetLandscape ? (isA6Sheet ? 148 : 210) : (isA6Sheet ? 105 : 148);
+        const h = isSheetLandscape ? (isA6Sheet ? 105 : 148) : (isA6Sheet ? 148 : 210);
+        pdf.addImage(imgData, 'PNG', 0, 0, w, h);
+      }
+
+      const filename = (menu?.bar_name || 'menu').replace(/[^a-z0-9]/gi, '-').toLowerCase() + '.pdf';
+      pdf.save(filename);
+      setStatus('PDF saved');
+    } catch (err) {
+      setError(err.message);
+      setStatus('Error: ' + err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const saveMenu = () => {
     if (!menu) return;
     setBusy(true);
     try {
-      await fetch('/api/save-menu', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: menu.bar_name, menu: { ...menu, columns } }),
-      });
-      setStatus('Saved to /menus');
+      store.saveMenu(menu.bar_name, { ...menu, columns });
+      setStatus('Saved');
       refreshMenus();
     } catch (err) { setError(err.message); setStatus('Error: ' + err.message); }
     finally { setBusy(false); }
   };
 
-  const loadMenu = async (key) => {
+  const loadMenu = (key) => {
     setDeleteConfirm(null);
     setBusy(true);
     try {
-      const data = await (await fetch('/api/load-menu/' + key)).json();
-      if (data.error) throw new Error(data.error);
+      const data = store.loadMenu(key);
+      if (!data) throw new Error('not found');
       setMenu(data);
       setColumns(data.columns || 1);
       setStatus('Loaded · ' + (data.bar_name || key));
@@ -207,9 +603,9 @@ export default function App() {
     finally { setBusy(false); }
   };
 
-  const deleteMenu = async (key) => {
+  const deleteMenu = (key) => {
     try {
-      await fetch('/api/delete-menu/' + key, { method: 'DELETE' });
+      store.deleteMenu(key);
       setDeleteConfirm(null);
       refreshMenus();
       setStatus('Deleted');
@@ -222,6 +618,12 @@ export default function App() {
         <div className="panel-header">
           <div className="kicker">Local Studio</div>
           <h1>The Menu Maker</h1>
+          {status !== 'Ready' && (
+            <div className="status-inline" role="status" aria-live="polite">
+              <span className={`status-inline-dot${busy ? ' busy' : ''}`} />
+              <span>{status}</span>
+            </div>
+          )}
         </div>
 
         {error && (
@@ -233,7 +635,7 @@ export default function App() {
 
         {/* STEP 1 */}
         <div className="block">
-          <div className="block-title"> Reference Menu</div>
+          <div className="block-title"><span className="step-num">1</span> Reference Menu</div>
           <div
             role="button"
             tabIndex={0}
@@ -247,7 +649,7 @@ export default function App() {
           >
             {imagePreview
               ? <img src={imagePreview} alt="reference" />
-              : <><div className="dropzone-icon">&#9023;</div><div className="dropzone-hint">{dragOver ? 'Release to load image' : 'Drop, paste, or click to upload a photo of a menu you admire.'}</div></>}
+              : <><div className="dropzone-icon">↑</div><div className="dropzone-hint">{dragOver ? 'Release to load image' : 'Drop, paste, or click to upload a photo of a menu you admire.'}</div></>}
           </div>
           <input ref={fileRef} type="file" accept="image/*" onChange={onPickFile} style={{ display: 'none' }} />
           {imageFile && <button className="btn" onClick={extractRules} disabled={busy}>Extract Design Rules</button>}
@@ -272,29 +674,39 @@ export default function App() {
                 {(rules.design_rules || []).slice(0, 5).map((r, i) => <div className="rule-line" key={i}>{r}</div>)}
               </div>
 
-              <input
-                type="text" aria-label="Style name" placeholder="Name this style… e.g. Death & Co"
-                value={refName} onChange={(e) => setRefName(e.target.value)}
-                maxLength={40}
-              />
-              <button className="btn" onClick={saveTemplate} disabled={busy}>Save as Template</button>
-              <p className="btn-caption">Saves as a standalone, reusable style.</p>
-              {!confirmBrain
-                ? <button className="btn btn-blood" onClick={() => setConfirmBrain(true)} disabled={busy}>+ Add to House Brain</button>
-                : <div className="confirm-brain">
-                    <span className="confirm-text">Merge "{(refName || rules.aesthetic_summary?.slice(0, 24) || 'this style').trim()}" into the master library?</span>
-                    <div className="confirm-row-btns">
-                      <button className="btn btn-sm" onClick={() => setConfirmBrain(false)}>Cancel</button>
-                      <button className="btn btn-blood btn-sm" onClick={() => { setConfirmBrain(false); addToHouseBrain(); }} disabled={busy}>Merge</button>
+              <button
+                className="save-style-toggle"
+                onClick={() => setShowSaveStyle(s => !s)}
+                aria-expanded={showSaveStyle}
+              >{showSaveStyle ? '↑ Collapse' : '+ Save this style'}</button>
+
+              {showSaveStyle && (
+                <>
+                  <input
+                    type="text" aria-label="Style name" placeholder="Name this style… e.g. Death & Co"
+                    value={refName} onChange={(e) => setRefName(e.target.value)}
+                    maxLength={40}
+                  />
+                  <button className="btn" onClick={saveTemplate} disabled={busy}>Save as Template</button>
+                  <p className="btn-caption">Saves as a standalone, reusable style.</p>
+                  {!confirmBrain
+                    ? <button className="btn btn-blood" onClick={() => setConfirmBrain(true)} disabled={busy}>+ Add to House Brain</button>
+                    : <div className="confirm-brain">
+                        <span className="confirm-text">Merge "{(refName || rules.aesthetic_summary?.slice(0, 24) || 'this style').trim()}" into the master library?</span>
+                        <div className="confirm-row-btns">
+                          <button className="btn btn-sm" onClick={() => setConfirmBrain(false)}>Cancel</button>
+                          <button className="btn btn-blood btn-sm" onClick={() => { setConfirmBrain(false); addToHouseBrain(); }} disabled={busy}>Merge</button>
+                        </div>
+                      </div>
+                  }
+                  <p className="btn-caption">Merges into your master library, combining with prior styles.</p>
+                  {merging && (
+                    <div className="extract-progress" aria-live="polite" aria-label="Merging into House Brain">
+                      <div className="dots"><span className="dot" /><span className="dot" /><span className="dot" /></div>
+                      <span className="extract-label">Merging into House Brain…</span>
                     </div>
-                  </div>
-              }
-              <p className="btn-caption">Merges into your master library, combining with prior styles.</p>
-              {merging && (
-                <div className="extract-progress" aria-live="polite" aria-label="Merging into House Brain">
-                  <div className="dots"><span className="dot" /><span className="dot" /><span className="dot" /></div>
-                  <span className="extract-label">Merging into House Brain…</span>
-                </div>
+                  )}
+                </>
               )}
             </>
           )}
@@ -327,7 +739,17 @@ export default function App() {
 
         {/* STEP 2 */}
         <div className="block">
-          <div className="block-title"> Compose</div>
+          <div className="block-title"><span className="step-num">2</span> Compose</div>
+
+          <label className="src-label">Format</label>
+          <div className="format-toggle format-toggle--compose">
+            <button aria-pressed={format === 'a5'} title="A5 Portrait — single dense page" className={'fmt-btn' + (format === 'a5' ? ' active' : '')} onClick={() => setFormat('a5')}>A5</button>
+            <button aria-pressed={format === 'a5h'} title="A5 Landscape — cover left, drinks right" className={'fmt-btn' + (format === 'a5h' ? ' active' : '')} onClick={() => setFormat('a5h')}>A5 ↔</button>
+            <button aria-pressed={format === 'a6'} title="A6 Portrait — compact card" className={'fmt-btn' + (format === 'a6' ? ' active' : '')} onClick={() => setFormat('a6')}>A6</button>
+            <button aria-pressed={format === 'a6h'} title="A6 Landscape — compact card, cover left, drinks right" className={'fmt-btn' + (format === 'a6h' ? ' active' : '')} onClick={() => setFormat('a6h')}>A6 ↔</button>
+            <button aria-pressed={format === 'booklet'} title="Booklet Portrait — paginated spreads" className={'fmt-btn' + (format === 'booklet' ? ' active' : '')} onClick={() => setFormat('booklet')}>Booklet</button>
+            <button aria-pressed={format === 'bookleth'} title="Booklet Landscape — paginated spreads" className={'fmt-btn' + (format === 'bookleth' ? ' active' : '')} onClick={() => setFormat('bookleth')}>Booklet ↔</button>
+          </div>
 
           <label className="src-label" htmlFor="source-select">Draw rules from</label>
           <select id="source-select" className="src-select" value={selectedSource} onChange={(e) => setSelectedSource(e.target.value)}>
@@ -362,14 +784,6 @@ export default function App() {
             placeholder="Your drinks (optional): Oaxacan Old Fashioned, Black Manhattan…"
             value={drinks} onChange={(e) => setDrinks(e.target.value)}
           />
-          <div className="col-picker">
-            <span className="src-label">Columns</span>
-            <div className="col-toggle">
-              {[1, 2, 3].map((n) => (
-                <button key={n} aria-pressed={columns === n} className={'col-btn' + (columns === n ? ' active' : '')} onClick={() => setColumns(n)}>{n}</button>
-              ))}
-            </div>
-          </div>
           <button className="btn-primary" onClick={generate} disabled={busy}>Compose Menu</button>
         </div>
         {/* SAVED MENUS */}
@@ -413,24 +827,30 @@ export default function App() {
         )}
       </aside>
 
-      <main className="canvas">
+      <main className="canvas" onClick={(e) => { if (!e.target.closest('.draggable-block') && !e.target.closest('.floating-toolbar')) { setSelectedKeys(new Set()); setActiveKey(null); } }}>
         <div className="canvas-bar">
           <span className="canvas-label">Menu Preview</span>
-          <div className="format-toggle">
-            <button aria-pressed={format === 'a5'} title="A5 Portrait — single dense page" className={'fmt-btn' + (format === 'a5' ? ' active' : '')} onClick={() => setFormat('a5')}>A5</button>
-            <button aria-pressed={format === 'a5h'} title="A5 Landscape — cover left, drinks right" className={'fmt-btn' + (format === 'a5h' ? ' active' : '')} onClick={() => setFormat('a5h')}>A5 ↔</button>
-            <button aria-pressed={format === 'booklet'} title="Booklet Portrait — paginated spreads" className={'fmt-btn' + (format === 'booklet' ? ' active' : '')} onClick={() => setFormat('booklet')}>Booklet</button>
-            <button aria-pressed={format === 'bookleth'} title="Booklet Landscape — paginated spreads" className={'fmt-btn' + (format === 'bookleth' ? ' active' : '')} onClick={() => setFormat('bookleth')}>Booklet ↔</button>
+          <div className="undo-controls">
+            <button className="zoom-btn" onClick={undo} disabled={!history.length} aria-label="Undo" title="Undo (Ctrl+Z)">↩</button>
+            <button className="zoom-btn" onClick={redo} disabled={!future.length} aria-label="Redo" title="Redo (Ctrl+Y)">↪</button>
+          </div>
+          <div className="zoom-controls">
+            <button className="zoom-btn" onClick={() => setZoom(z => Math.max(0.4, +(z - 0.1).toFixed(1)))} aria-label="Zoom out" title="Zoom out">−</button>
+            <span className="zoom-label">{Math.round(zoom * 100)}%</span>
+            <button className="zoom-btn" onClick={() => setZoom(z => Math.min(2, +(z + 0.1).toFixed(1)))} aria-label="Zoom in" title="Zoom in">+</button>
+            <button className="zoom-btn zoom-btn-reset" onClick={() => setZoom(1)} aria-label="Reset zoom" title="Reset zoom">⟳</button>
           </div>
         </div>
 
         {menu ? (
           <>
-            <MenuTemplate menu={menu} format={format} columns={columns} onEdit={editMenu} onDrag={editMenu} />
-            <div className="edit-hint">Click any text on the menu to edit it before exporting.</div>
+            <div className="zoom-wrapper" style={{ transform: `scale(${zoom})`, transformOrigin: 'top center', transition: 'transform 0.2s' }}>
+              <MenuTemplate menu={menu} format={format} columns={columns} onEdit={editMenu} onDrag={editMenuSilent} onSnapshot={snapshotMenu} onCommit={commitSnapshot} ornaments={ornaments} contentAlign={contentAlign} selectedKeys={selectedKeys} onSelectionChange={setSelectedKeys} activeKey={activeKey} onActiveKeyChange={setActiveKey} zoom={zoom} />
+            </div>
+            <div className="edit-hint">Click to select · Drag corners to resize · Drag side bars for width · Double-click text to edit</div>
             <div className="export-bar">
-              <button className="export-btn" onClick={exportPDF}>Export PDF</button>
-              <button className="export-btn" onClick={saveMenu}>Save to /menus</button>
+              <button className="export-btn" onClick={saveAsPDF} disabled={busy}>Save as PDF</button>
+              <button className="export-btn" onClick={saveMenu}>Save Menu</button>
             </div>
             {printHint && (
               <div className="print-hint" role="note">
@@ -451,107 +871,17 @@ export default function App() {
         )}
       </main>
 
-      <aside className="panel panel-right">
-        <div className="panel-header">
-          <div className="kicker">Menu Style</div>
-          <h1>Style</h1>
-        </div>
-        {menu ? (
-          <>
-            <div className="block">
-              <div className="block-title">Colors</div>
-              <div className="style-row">
-                {[
-                  { key: 'background',   label: 'BG'     },
-                  { key: 'text_primary', label: 'Text'   },
-                  { key: 'accent',       label: 'Accent' },
-                  { key: 'text_muted',   label: 'Muted'  },
-                ].map(({ key, label }) => (
-                  <label key={key} className="color-swatch-wrap" title={label}>
-                    <input type="color" className="color-input"
-                      value={menu.render_spec?.[key] || '#888888'}
-                      onChange={(e) => editMenu(['render_spec', key], e.target.value)}
-                    />
-                    <span className="color-name">{label}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            <div className="block">
-              <div className="block-title">Layout</div>
-              <span className="src-label">Spacing</span>
-              <div className="style-row">
-                {[
-                  ['Compact',  'compact',  'Tighter padding and item spacing'],
-                  ['Balanced', 'balanced', 'Default spacing'],
-                  ['Airy',     'airy',     'Generous breathing room between items'],
-                ].map(([label, val, tip]) => (
-                  <button key={val}
-                    className={'style-chip' + ((menu.render_spec?.spacing || 'balanced') === val ? ' active' : '')}
-                    onClick={() => editMenu(['render_spec', 'spacing'], val)}
-                    title={tip}
-                  >{label}</button>
-                ))}
-              </div>
-              <span className="src-label">Title</span>
-              <div className="style-row">
-                {[['S', 0.75], ['M', 1], ['L', 1.3]].map(([label, scale]) => (
-                  <button key={label}
-                    className={'style-chip' + ((menu.render_spec?.title_scale || 1) === scale ? ' active' : '')}
-                    onClick={() => editMenu(['render_spec', 'title_scale'], scale)}
-                  >{label}</button>
-                ))}
-              </div>
-            </div>
-
-            <div className="block">
-              <div className="block-title">Content</div>
-              <div className="style-row">
-                {[
-                  { key: 'show_ingredients', label: 'Ingredients' },
-                  { key: 'show_prices',      label: 'Prices'      },
-                ].map(({ key, label }) => {
-                  const on = menu.render_spec?.[key] !== false;
-                  return (
-                    <button key={key}
-                      className={'style-chip toggle-chip' + (on ? ' active' : '')}
-                      onClick={() => editMenu(['render_spec', key], !on)}
-                      aria-pressed={on}
-                    >{on ? '✓ ' : ''}{label}</button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="block">
-              <div className="block-title">Fonts</div>
-              <span className="src-label">Display</span>
-              <div className="font-col">
-                {DISPLAY_FONTS.map(f => (
-                  <button key={f}
-                    className={'font-chip' + ((menu.render_spec?.display_font || 'Cormorant Garamond') === f ? ' active' : '')}
-                    style={{ fontFamily: `'${f}', serif` }}
-                    onClick={() => editMenu(['render_spec', 'display_font'], f)}
-                  >{f}</button>
-                ))}
-              </div>
-              <span className="src-label">Body</span>
-              <div className="font-col">
-                {BODY_FONTS.map(f => (
-                  <button key={f}
-                    className={'font-chip' + ((menu.render_spec?.body_font || 'Archivo Narrow') === f ? ' active' : '')}
-                    style={{ fontFamily: `'${f}', sans-serif` }}
-                    onClick={() => editMenu(['render_spec', 'body_font'], f)}
-                  >{f}</button>
-                ))}
-              </div>
-            </div>
-          </>
-        ) : (
-          <div className="panel-empty">Generate a menu to adjust its style.</div>
-        )}
-      </aside>
+      <StylePanel
+        menu={menu}
+        columns={columns}
+        contentAlign={contentAlign}
+        ornaments={ornaments}
+        selectedKeys={selectedKeys}
+        onEditMenu={editMenu}
+        onSetColumns={setColumns}
+        onSetContentAlign={setContentAlign}
+        onSetOrnaments={setOrnaments}
+      />
     </div>
   );
 }
