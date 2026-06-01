@@ -4,26 +4,20 @@
   "description": "Local menu design studio — upload a menu you love, extract its rules, generate print-ready PDFs.",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -k -n server,vite -c magenta,cyan \"node server.js\" \"vite\"",
-    "server": "node server.js",
-    "client": "vite",
+    "dev": "vercel dev",
+    "dev:vite": "vite",
     "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
-    "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
-    "express": "^4.21.1",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
-    "multer": "^1.4.5-lts.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",
-    "concurrently": "^9.1.0",
     "vite": "^6.0.3"
   }
 }

@@ -150,6 +150,8 @@ function FloatingToolbar({ activeKey, menu, onEdit, zoom }) {
   for (const k of segs) { if (node == null) break; node = node[k]; }
   const style = node?.style || {};
   const scale = node?.scale ?? 1;
+  const locked = !!node?.locked;
+  const hidden = !!node?.hidden;
 
   const setStyle = (patch) => {
     onEdit([...segs, 'style'], { ...style, ...patch });
@@ -157,29 +159,40 @@ function FloatingToolbar({ activeKey, menu, onEdit, zoom }) {
   const setScale = (s) => {
     onEdit([...segs, 'scale'], Math.max(0.4, Math.min(3, s)));
   };
+  const toggleLocked = () => onEdit([...segs, 'locked'], !locked);
+  const toggleHidden = () => onEdit([...segs, 'hidden'], !hidden);
 
   return ReactDOM.createPortal(
     <div className="floating-toolbar" style={{ left: pos.left, top: pos.top }}
          onMouseDown={(e) => e.stopPropagation()}
          onClick={(e) => e.stopPropagation()}>
-      <button className="ft-btn" title="Smaller" onClick={() => setScale(+(scale - 0.1).toFixed(2))}>A−</button>
+      <button className="ft-btn" title="Smaller" onClick={() => setScale(+(scale - 0.1).toFixed(2))} disabled={locked}>A−</button>
       <span className="ft-val">{Math.round(scale * 100)}%</span>
-      <button className="ft-btn" title="Larger" onClick={() => setScale(+(scale + 0.1).toFixed(2))}>A+</button>
+      <button className="ft-btn" title="Larger" onClick={() => setScale(+(scale + 0.1).toFixed(2))} disabled={locked}>A+</button>
       <span className="ft-sep" />
       <button className={'ft-btn ft-toggle' + (style.bold ? ' active' : '')}
-              title="Bold" onClick={() => setStyle({ bold: !style.bold })}><b>B</b></button>
+              title="Bold" onClick={() => setStyle({ bold: !style.bold })} disabled={locked}><b>B</b></button>
       <button className={'ft-btn ft-toggle' + (style.italic ? ' active' : '')}
-              title="Italic" onClick={() => setStyle({ italic: !style.italic })}><i>I</i></button>
+              title="Italic" onClick={() => setStyle({ italic: !style.italic })} disabled={locked}><i>I</i></button>
       <span className="ft-sep" />
-      <label className="ft-color" title="Text color">
+      <label className={'ft-color' + (locked ? ' ft-color--disabled' : '')} title="Text color">
         <span className="ft-color-swatch" style={{ background: style.color || '#000' }} />
         <input type="color" value={style.color || '#000000'}
-               onChange={(e) => setStyle({ color: e.target.value })} />
+               onChange={(e) => setStyle({ color: e.target.value })} disabled={locked} />
       </label>
       {style.color && (
         <button className="ft-btn ft-btn--mini" title="Clear color"
-                onClick={() => setStyle({ color: undefined })}>×</button>
+                onClick={() => setStyle({ color: undefined })} disabled={locked}>×</button>
       )}
+      <span className="ft-sep" />
+      <button className={'ft-btn ft-toggle' + (locked ? ' active' : '')}
+              title={locked ? 'Unlock (allow edits)' : 'Lock (prevent edits)'}
+              aria-pressed={locked}
+              onClick={toggleLocked}>{locked ? '🔒' : '🔓'}</button>
+      <button className={'ft-btn ft-toggle' + (hidden ? ' active' : '')}
+              title={hidden ? 'Show block' : 'Hide block'}
+              aria-pressed={hidden}
+              onClick={toggleHidden}>{hidden ? '🙈' : '👁'}</button>
     </div>,
     document.body
   );
@@ -510,6 +523,8 @@ function Editable({ className, value, onSave, multiline = false, style, role, 'a
 
   const handleDoubleClick = (e) => {
     e.stopPropagation();
+    // Don't allow text editing if the parent block is locked
+    if (ref.current?.closest('.draggable-block.is-locked')) return;
     unlock();
     // Don't touch selection — let browser word-select stand
     setTimeout(() => ref.current?.focus(), 0);
@@ -523,7 +538,10 @@ function Editable({ className, value, onSave, multiline = false, style, role, 'a
 
   const handleKeyDown = (e) => {
     if (!editingRef.current) {
-      if (e.key === 'Enter' || e.key === 'F2') { e.preventDefault(); unlock(); ref.current?.focus(); }
+      if (e.key === 'Enter' || e.key === 'F2') {
+        if (ref.current?.closest('.draggable-block.is-locked')) return;
+        e.preventDefault(); unlock(); ref.current?.focus();
+      }
       return;
     }
     if (e.key === 'Escape') { e.currentTarget.blur(); }
@@ -727,6 +745,9 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
     const baseItemScale = layout.sections?.[si]?.cocktails?.[ci]?.scale ?? 1;
     const elemWidth = getLayoutVal(layout, ['sections', si, 'cocktails', ci, 'width'], null);
     const elemStyle = getLayoutVal(layout, ['sections', si, 'cocktails', ci, 'style'], null) || {};
+    const locked = !!getLayoutVal(layout, ['sections', si, 'cocktails', ci, 'locked'], false);
+    const hidden = !!getLayoutVal(layout, ['sections', si, 'cocktails', ci, 'hidden'], false);
+    if (hidden) return null;
     registerDraggable(key, layoutPath, off);
     const isActive = activeKey === key;
     const isSelected = selectedKeys.has(key);
@@ -737,6 +758,12 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
 
     const handleMouseDown = onDrag ? (e) => {
       if (e.shiftKey) { e.preventDefault(); toggleSelected(key); return; }
+      if (locked) {
+        e.preventDefault();
+        if (!isSelected) setSelectedKeys(new Set([key]));
+        setActiveKey(key);
+        return;
+      }
       onMouseDownDrag(e);
     } : undefined;
 
@@ -748,7 +775,7 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
 
     return (
       <div
-        className={'draggable-block m-item' + (isSelected ? ' drag-selected' : '') + (isActive ? ' sel-active' : '')}
+        className={'draggable-block m-item' + (isSelected ? ' drag-selected' : '') + (isActive ? ' sel-active' : '') + (locked ? ' is-locked' : '')}
         style={{
           top: off.y, left: off.x,
           transform: combinedScale !== 1 ? `scale(${combinedScale})` : undefined,
@@ -760,10 +787,11 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
         data-elem-color={elemStyle.color || undefined}
         data-elem-bold={elemStyle.bold ? '' : undefined}
         data-elem-italic={elemStyle.italic ? '' : undefined}
+        data-locked-block={locked ? '' : undefined}
         onMouseDown={handleMouseDown}
         onClick={handleClick}
       >
-        {isActive && !isGroupSelection && (
+        {isActive && !isGroupSelection && !locked && (
           <SelectionBox
             layoutPath={['_layout', 'sections', si, 'cocktails', ci]}
             scale={baseItemScale}
@@ -807,6 +835,9 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
     const headerScale = getLayoutVal(layout, ['sections', si, 'header', 'scale'], 1);
     const headerWidth = getLayoutVal(layout, ['sections', si, 'header', 'width'], null);
     const headerStyle = getLayoutVal(layout, ['sections', si, 'header', 'style'], null) || {};
+    const locked = !!getLayoutVal(layout, ['sections', si, 'header', 'locked'], false);
+    const hidden = !!getLayoutVal(layout, ['sections', si, 'header', 'hidden'], false);
+    if (hidden) return null;
     registerDraggable(key, layoutPath, off);
     const isActive = activeKey === key;
     const isSelected = selectedKeys.has(key);
@@ -817,6 +848,12 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
 
     const handleMouseDown = onDrag ? (e) => {
       if (e.shiftKey) { e.preventDefault(); toggleSelected(key); return; }
+      if (locked) {
+        e.preventDefault();
+        if (!isSelected) setSelectedKeys(new Set([key]));
+        setActiveKey(key);
+        return;
+      }
       onMouseDownDrag(e);
     } : undefined;
 
@@ -826,7 +863,7 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
 
     return (
       <div
-        className={'draggable-block' + (isSelected ? ' drag-selected' : '') + (isActive ? ' sel-active' : '')}
+        className={'draggable-block' + (isSelected ? ' drag-selected' : '') + (isActive ? ' sel-active' : '') + (locked ? ' is-locked' : '')}
         style={{
           top: off.y, left: off.x,
           transform: headerScale !== 1 ? `scale(${headerScale})` : undefined,
@@ -837,10 +874,11 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
         data-elem-color={headerStyle.color || undefined}
         data-elem-bold={headerStyle.bold ? '' : undefined}
         data-elem-italic={headerStyle.italic ? '' : undefined}
+        data-locked-block={locked ? '' : undefined}
         onMouseDown={handleMouseDown}
         onClick={handleClick}
       >
-        {isActive && !isGroupSelection && (
+        {isActive && !isGroupSelection && !locked && (
           <SelectionBox
             layoutPath={['_layout', 'sections', si, 'header']}
             scale={headerScale}
@@ -871,6 +909,9 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
     const blockScale = getLayoutVal(layout, ['cover', ...layoutSubPath, 'scale'], 1);
     const blockWidth = getLayoutVal(layout, ['cover', ...layoutSubPath, 'width'], null);
     const blockStyle = getLayoutVal(layout, ['cover', ...layoutSubPath, 'style'], null) || {};
+    const locked = !!getLayoutVal(layout, ['cover', ...layoutSubPath, 'locked'], false);
+    const hidden = !!getLayoutVal(layout, ['cover', ...layoutSubPath, 'hidden'], false);
+    if (hidden) return null;
     registerDraggable(key, layoutPath, off);
     const isActive = activeKey === key;
     const isSelected = selectedKeys.has(key);
@@ -881,6 +922,12 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
 
     const handleMouseDown = onDrag ? (e) => {
       if (e.shiftKey) { e.preventDefault(); toggleSelected(key); return; }
+      if (locked) {
+        e.preventDefault();
+        if (!isSelected) setSelectedKeys(new Set([key]));
+        setActiveKey(key);
+        return;
+      }
       onMouseDownDrag(e);
     } : undefined;
 
@@ -890,7 +937,8 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
 
     return (
       <div
-        className={'draggable-block' + (isSelected ? ' drag-selected' : '') + (isActive ? ' sel-active' : '')}
+        className={'draggable-block' + (isSelected ? ' drag-selected' : '') + (isActive ? ' sel-active' : '') + (locked ? ' is-locked' : '')}
+        data-locked-block={locked ? '' : undefined}
         style={{
           top: off.y, left: off.x,
           transform: blockScale !== 1 ? `scale(${blockScale})` : undefined,
@@ -904,7 +952,7 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
         onMouseDown={handleMouseDown}
         onClick={handleClick}
       >
-        {isActive && !isGroupSelection && (
+        {isActive && !isGroupSelection && !locked && (
           <SelectionBox
             layoutPath={['_layout', 'cover', ...layoutSubPath]}
             scale={blockScale}
@@ -945,6 +993,8 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
     const footerScale = getLayoutVal(layout, ['footer', 'scale'], 1);
     const footerWidth = getLayoutVal(layout, ['footer', 'width'], null);
     const footerStyle = getLayoutVal(layout, ['footer', 'style'], null) || {};
+    const locked = !!getLayoutVal(layout, ['footer', 'locked'], false);
+    const hidden = !!getLayoutVal(layout, ['footer', 'hidden'], false);
     const isActive = activeKey === key;
     const isSelected = selectedKeys.has(key);
     const onMouseDownDrag = useDragBlock(layoutPath, off, onDrag, onSnapshot, onCommit, getGroupDrags, onSnap, zoom, () => {
@@ -954,6 +1004,12 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
 
     const handleMouseDown = onDrag ? (e) => {
       if (e.shiftKey) { e.preventDefault(); toggleSelected(key); return; }
+      if (locked) {
+        e.preventDefault();
+        if (!isSelected) setSelectedKeys(new Set([key]));
+        setActiveKey(key);
+        return;
+      }
       onMouseDownDrag(e);
     } : undefined;
 
@@ -961,9 +1017,10 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
       e.stopPropagation();
     };
 
+    if (hidden) return null;
     return menu.note ? (
       <div
-        className={'draggable-block' + (isSelected ? ' drag-selected' : '') + (isActive ? ' sel-active' : '')}
+        className={'draggable-block' + (isSelected ? ' drag-selected' : '') + (isActive ? ' sel-active' : '') + (locked ? ' is-locked' : '')}
         style={{
           top: off.y, left: off.x,
           transform: footerScale !== 1 ? `scale(${footerScale})` : undefined,
@@ -974,10 +1031,11 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
         data-elem-color={footerStyle.color || undefined}
         data-elem-bold={footerStyle.bold ? '' : undefined}
         data-elem-italic={footerStyle.italic ? '' : undefined}
+        data-locked-block={locked ? '' : undefined}
         onMouseDown={handleMouseDown}
         onClick={handleClick}
       >
-        {isActive && !isGroupSelection && (
+        {isActive && !isGroupSelection && !locked && (
           <SelectionBox
             layoutPath={['_layout', 'footer']}
             scale={footerScale}

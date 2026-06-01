@@ -2,6 +2,25 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import MenuTemplate from './MenuTemplate.jsx';
 import StylePanel from './StylePanel.jsx';
 import { MENU_DEFAULTS, THEME } from './theme.js';
+import * as store from './storage.js';
+
+// Label a palette object's hexes with their source menu (for seeding the master).
+function labelPalette(palette, source) {
+  if (!palette) return [];
+  return Object.entries(palette)
+    .filter(([, v]) => v)
+    .map(([role, hex]) => ({ role, hex, source }));
+}
+
+// Read a File as a base64 string (no data: prefix) for the API.
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
 export default function App() {
   const [imagePreview, setImagePreview] = useState(null);
@@ -43,23 +62,14 @@ export default function App() {
   const fileRef = useRef(null);
   const menuRef = useRef(menu);
 
-  const refreshSources = async () => {
-    try {
-      const res = await fetch('/api/list-rules');
-      const data = await res.json();
-      setSources(data);
-      if (data.master) {
-        const m = await (await fetch('/api/load-rules/_master')).json();
-        setMasterInfo(m);
-      }
-    } catch { /* server not up yet */ }
+  const refreshSources = () => {
+    const data = store.listRules();
+    setSources(data);
+    if (data.master) setMasterInfo(store.loadMaster());
   };
 
-  const refreshMenus = async () => {
-    try {
-      const data = await (await fetch('/api/list-menus')).json();
-      setSavedMenus(data);
-    } catch { /* server not up yet */ }
+  const refreshMenus = () => {
+    setSavedMenus(store.listMenus());
   };
 
   useEffect(() => { refreshSources(); refreshMenus(); }, []);
@@ -150,9 +160,11 @@ export default function App() {
     if (!imageFile) return;
     setExtracting(true); setBusy(true); setError(null); setStatus('Extracting design rules…');
     try {
-      const fd = new FormData();
-      fd.append('image', imageFile);
-      const res = await fetch('/api/extract-rules', { method: 'POST', body: fd });
+      const imageBase64 = await fileToBase64(imageFile);
+      const res = await fetch('/api/extract-rules', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64, mediaType: imageFile.type || 'image/jpeg' }),
+      });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setRules(data);
@@ -168,10 +180,7 @@ export default function App() {
     const name = (refName || rules.aesthetic_summary?.slice(0, 24) || 'untitled').trim();
     setBusy(true);
     try {
-      await fetch('/api/save-rules', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, rules }),
-      });
+      store.saveRules(name, rules);
       setStatus('Saved "' + name + '" template');
       refreshSources();
     } catch (err) { setError(err.message); setStatus('Error: ' + err.message); }
@@ -184,14 +193,37 @@ export default function App() {
     const name = (refName || rules.aesthetic_summary?.slice(0, 24) || 'a menu').trim();
     setBusy(true); setMerging(true); setError(null); setStatus('Merging into House Brain…');
     try {
+      const existing = store.loadMaster();
+
+      // First menu ever — seed the master directly, no AI reconciliation needed.
+      if (!existing) {
+        const seeded = {
+          aesthetic_summary: rules.aesthetic_summary,
+          source_menus: [name],
+          palette_library: labelPalette(rules.palette, name),
+          typography_options: rules.typography ? [{ from: name, ...rules.typography }] : [],
+          layout_principles: rules.layout ? [{ from: name, ...rules.layout }] : [],
+          copy_voice: rules.copy_voice ? [{ from: name, voice: rules.copy_voice }] : [],
+          decorative_elements: rules.decorative_elements ? [{ from: name, notes: rules.decorative_elements }] : [],
+          design_rules: (rules.design_rules || []).map((r) => ({ rule: r, sources: [name] })),
+          divergences: [],
+        };
+        store.saveMaster(seeded);
+        setMasterInfo(seeded);
+        setStatus('House Brain created');
+        refreshSources();
+        return;
+      }
+
       const res = await fetch('/api/merge-master', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, newRules: rules }),
+        body: JSON.stringify({ name, newRules: rules, existing }),
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
+      store.saveMaster(data.master);
       setMasterInfo(data.master);
-      setStatus(data.seeded ? 'House Brain created' : 'Merged into House Brain — ' + name);
+      setStatus('Merged into House Brain — ' + name);
       refreshSources();
     } catch (err) { setError(err.message); setStatus('Error: ' + err.message); }
     finally { setBusy(false); setMerging(false); }
@@ -205,9 +237,9 @@ export default function App() {
     try {
       let sourceRules = rules || {};
       if (selectedSource === 'master' && sources.master) {
-        sourceRules = await (await fetch('/api/load-rules/_master')).json();
+        sourceRules = store.loadMaster() || sourceRules;
       } else if (selectedSource && selectedSource !== 'current' && selectedSource !== 'master') {
-        sourceRules = await (await fetch('/api/load-rules/' + selectedSource)).json();
+        sourceRules = store.loadRules(selectedSource) || sourceRules;
       }
       const res = await fetch('/api/generate-menu', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -300,6 +332,7 @@ export default function App() {
   // Remove element by key. Returns true if removed.
   const deleteElement = (key) => {
     if (!key) return;
+    if (readPath(menu, parseKey(key))?.locked) return;
     // Cocktails: _layout.sections.<si>.cocktails.<ci>
     let m = key.match(/^_layout\.sections\.(\d+)\.cocktails\.(\d+)$/);
     if (m) {
@@ -479,6 +512,7 @@ export default function App() {
   const nudgeActive = (dx, dy) => {
     if (!activeKey || !menu) return;
     const path = parseKey(activeKey);
+    if (readPath(menu, path)?.locked) return;
     mutateWithHistory(next => {
       let node = next;
       for (let i = 0; i < path.length; i++) {
@@ -545,26 +579,23 @@ export default function App() {
       setBusy(false);
     }
   };
-  const saveMenu = async () => {
+  const saveMenu = () => {
     if (!menu) return;
     setBusy(true);
     try {
-      await fetch('/api/save-menu', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: menu.bar_name, menu: { ...menu, columns } }),
-      });
-      setStatus('Saved to /menus');
+      store.saveMenu(menu.bar_name, { ...menu, columns });
+      setStatus('Saved');
       refreshMenus();
     } catch (err) { setError(err.message); setStatus('Error: ' + err.message); }
     finally { setBusy(false); }
   };
 
-  const loadMenu = async (key) => {
+  const loadMenu = (key) => {
     setDeleteConfirm(null);
     setBusy(true);
     try {
-      const data = await (await fetch('/api/load-menu/' + key)).json();
-      if (data.error) throw new Error(data.error);
+      const data = store.loadMenu(key);
+      if (!data) throw new Error('not found');
       setMenu(data);
       setColumns(data.columns || 1);
       setStatus('Loaded · ' + (data.bar_name || key));
@@ -572,9 +603,9 @@ export default function App() {
     finally { setBusy(false); }
   };
 
-  const deleteMenu = async (key) => {
+  const deleteMenu = (key) => {
     try {
-      await fetch('/api/delete-menu/' + key, { method: 'DELETE' });
+      store.deleteMenu(key);
       setDeleteConfirm(null);
       refreshMenus();
       setStatus('Deleted');
@@ -819,7 +850,7 @@ export default function App() {
             <div className="edit-hint">Click to select · Drag corners to resize · Drag side bars for width · Double-click text to edit</div>
             <div className="export-bar">
               <button className="export-btn" onClick={saveAsPDF} disabled={busy}>Save as PDF</button>
-              <button className="export-btn" onClick={saveMenu}>Save to /menus</button>
+              <button className="export-btn" onClick={saveMenu}>Save Menu</button>
             </div>
             {printHint && (
               <div className="print-hint" role="note">
