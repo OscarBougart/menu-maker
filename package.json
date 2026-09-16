@@ -4,8 +4,7 @@
   "description": "Local menu design studio — upload a menu you love, extract its rules, generate print-ready PDFs.",
   "type": "module",
   "scripts": {
-    "dev": "vercel dev",
-    "dev:vite": "vite",
+    "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"
   },

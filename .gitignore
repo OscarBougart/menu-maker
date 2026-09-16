@@ -5,3 +5,6 @@ dist
 menus/*.json
 rules/*.json
 !rules/.gitkeep
+
+.vercel
+.env*.local

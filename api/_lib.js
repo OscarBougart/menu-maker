@@ -3,7 +3,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 
-export const MODEL = process.env.MENU_MODEL || 'claude-sonnet-4-20250514';
+export const MODEL = process.env.MENU_MODEL || 'claude-sonnet-5';
 
 export const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
