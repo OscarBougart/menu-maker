@@ -18,7 +18,7 @@
   --blood-error: var(--error-text);
   --line:        color-mix(in srgb, var(--panel-text-dim) 20%, transparent);
   --line-bright: color-mix(in srgb, var(--accent-bright) 40%, transparent);
-  --sheet-shadow: 0 50px 140px oklch(8% 0.005 240 / 0.55);
+  --sheet-shadow: 0 50px 140px rgb(2 4 6 / 0.55); /* plain rgb: html2canvas (PDF/Instagram export) cannot parse oklch */
 
   /* Spacing scale — 4px base unit */
   --sp-1: 4px;
@@ -250,7 +250,7 @@ textarea::placeholder, input::placeholder { color: var(--bone-faint); font-style
   font-weight: 600;
 }
 
-.export-bar { display: flex; gap: 8px; margin-top: 24px; width: 100%; max-width: 480px; }
+.export-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; width: 100%; max-width: 560px; }
 .export-btn {
   flex: 1; background: transparent; border: 1px solid var(--canvas-border); border-radius: 2px;
   color: var(--canvas-text-dim); cursor: pointer; font-family: 'Archivo Narrow', sans-serif;
