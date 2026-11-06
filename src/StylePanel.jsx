@@ -1,8 +1,11 @@
 import React from 'react';
+import { CHRISTMAS_ORNAMENT_LABELS } from './ornaments-christmas.js';
 
 const DISPLAY_FONTS = [
   'Cormorant Garamond', 'Playfair Display', 'EB Garamond',
   'Cinzel', 'Bodoni Moda', 'DM Serif Display', 'Libre Baskerville',
+  // Christmas / festive display faces
+  'Pinyon Script', 'Great Vibes', 'UnifrakturMaguntia', 'IM Fell English', 'Mountains of Christmas',
 ];
 const BODY_FONTS = [
   'Archivo Narrow', 'Jost', 'Inter Tight',
@@ -206,6 +209,11 @@ export default function StylePanel({
               <option value="japanese">Japanese</option>
               <option value="hairline">Hairline</option>
               <option value="bauhaus">Bauhaus</option>
+              <optgroup label="Christmas">
+                {Object.entries(CHRISTMAS_ORNAMENT_LABELS).map(([key, label]) => (
+                  <option key={key} value={key}>{label}</option>
+                ))}
+              </optgroup>
             </select>
             {ornaments.style !== 'none' && (
               <>

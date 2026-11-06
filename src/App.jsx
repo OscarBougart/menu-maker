@@ -5,6 +5,14 @@ import { MENU_DEFAULTS, THEME } from './theme.js';
 import * as store from './storage.js';
 
 // Label a palette object's hexes with their source menu (for seeding the master).
+const CHRISTMAS_PRESETS = [
+  { label: 'Victorian Yule', value: 'deep holly green + cranberry + antique gold on cream, 8 cocktails — mulled wine, spiced punch, figgy brandy flips, Dickensian Christmas' },
+  { label: 'Nordic Winter',  value: 'frost white + slate blue + silver, 7 cocktails — aquavit, cardamom, lingonberry, Scandinavian hygge, minimal' },
+  { label: 'Alpine Chalet',  value: 'pine green + walnut + cream, 8 warm cocktails — hot toddies, glühwein, chestnut, après-ski lodge' },
+  { label: 'Midnight Mass',  value: 'midnight navy + candle gold, 6 cocktails — frankincense, myrrh, honey, spiced rum, candlelit and solemn' },
+  { label: "New Year's Eve", value: 'black + champagne gold, 8 cocktails — champagne cocktails, sparkling, gold-flecked, art deco countdown' },
+];
+
 function labelPalette(palette, source) {
   if (!palette) return [];
   return Object.entries(palette)
@@ -775,6 +783,14 @@ export default function App() {
               { label: 'Late-night', value: 'charcoal + warm amber, 8 cocktails, underground jazz bar' },
             ].map(({ label, value }) => (
               <button key={label} type="button" className={'preset-chip' + (prompt === value ? ' active' : '')}
+                onClick={() => setPrompt(prompt === value ? '' : value)} title={value}>{label}</button>
+            ))}
+          </div>
+          <span className="src-label" style={{ marginTop: 10 }}>Christmas</span>
+          <div className="preset-row" role="group" aria-label="Christmas presets">
+            {CHRISTMAS_PRESETS.map(({ label, value }) => (
+              <button key={label} type="button" className={'preset-chip' + (prompt === value ? ' active' : '')}
+                aria-pressed={prompt === value}
                 onClick={() => setPrompt(prompt === value ? '' : value)} title={value}>{label}</button>
             ))}
           </div>

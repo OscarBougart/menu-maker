@@ -28,10 +28,13 @@ ${drinks && drinks.trim()
   : 'Compose 6-7 original cocktails fitting the brief and design system.'}
 
 AVAILABLE FONTS — you must only use fonts from these lists:
-Display: Cormorant Garamond, Playfair Display, EB Garamond, Cinzel, Bodoni Moda, DM Serif Display, Libre Baskerville
+Display: Cormorant Garamond, Playfair Display, EB Garamond, Cinzel, Bodoni Moda, DM Serif Display, Libre Baskerville, Pinyon Script, Great Vibes, UnifrakturMaguntia, IM Fell English, Mountains of Christmas
 Body: Archivo Narrow, Inter Tight, Jost, Barlow Condensed, DM Sans, Outfit
 ${fontHint}
 Choose the pairing that best matches the extracted typography character and brief mood.
+Pinyon Script, Great Vibes, UnifrakturMaguntia, IM Fell English and Mountains of Christmas are festive/holiday faces — only pick them when the brief is seasonal (Christmas, winter, New Year's Eve).
+
+SEASONAL BRIEFS: if the brief mentions a holiday or season, let it shape the whole menu — section titles (e.g. "Fireside", "Under the Mistletoe", "Midnight"), the tagline and the front-of-house note should all reflect it, and every drink must be seasonally plausible (warm, spiced, sparkling, wintry ingredients as appropriate). Keep it refined, never kitsch.
 
 Return ONLY valid JSON, no markdown. Echo back a final palette/type spec so the renderer can match the reference:
 {
