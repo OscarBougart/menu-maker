@@ -274,6 +274,164 @@ const starFrame = (W, H) => join(
   star(W / 2, 19, 7, 1.8, 4), star(W / 2, H - 19, 7, 1.8, 4),
 );
 
+// ── MISTLETOE ────────────────────────────────────────────────
+/** Smooth almond leaf, base at (x, y), pointing at `angleDeg` (clockwise winding). */
+function almondLeaf(x, y, len, w, angleDeg) {
+  const a = rad(angleDeg);
+  const T = ([px, py]) => [x + px * Math.cos(a) - py * Math.sin(a), y + px * Math.sin(a) + py * Math.cos(a)];
+  return `M ${pt(T([0, 0]))} Q ${pt(T([len * 0.5, -w * 1.15]))} ${pt(T([len, 0]))} ` +
+    `Q ${pt(T([len * 0.5, w * 1.15]))} ${pt(T([0, 0]))} Z`;
+}
+
+/** Hanging sprig: leaf pair splayed below (x, y), berries at the join. */
+const mistletoeSprig = (x, y, s) => join(
+  almondLeaf(x, y, 13 * s, 2.6 * s, 125), almondLeaf(x, y, 13 * s, 2.6 * s, 55),
+  almondLeaf(x, y, 10 * s, 2.2 * s, 160), almondLeaf(x, y, 10 * s, 2.2 * s, 20),
+  circle(x, y + 2 * s, 1.9 * s), circle(x - 2.6 * s, y + 0.6 * s, 1.5 * s), circle(x + 2.6 * s, y + 0.6 * s, 1.5 * s),
+);
+
+const mistletoeCorner = mk('0 0 40 40', join(
+  rect(3, 3, 34, 1.4), rect(3, 3, 1.4, 34),
+  almondLeaf(8, 8, 17, 3.2, 18), almondLeaf(8, 8, 17, 3.2, 72),
+  almondLeaf(8, 8, 12, 2.6, 45),
+  circle(9, 9, 2.3), circle(13, 10.5, 1.7), circle(10.5, 13, 1.7),
+));
+
+const mistletoeDivider = mk('0 0 200 20', join(
+  rect(0, 9.4, 76, 1.2), rect(124, 9.4, 76, 1.2),
+  rect(99.4, 0, 1.2, 5), // the ribbon it hangs from
+  mistletoeSprig(100, 5, 1.05),
+));
+
+const mistletoeAccent = mk('0 0 16 16', join(
+  almondLeaf(8, 4, 11, 1.7, 112), almondLeaf(8, 4, 11, 1.7, 68),
+  circle(8, 4.4, 1.9), circle(5.7, 3.4, 1.4), circle(10.3, 3.4, 1.4),
+));
+
+const mistletoeItemRule = mk('0 0 200 8', join(
+  rect(0, 3.5, 86, 1), rect(114, 3.5, 86, 1),
+  almondLeaf(100, 4, 12, 2.2, 180), almondLeaf(100, 4, 12, 2.2, 0),
+  circle(100, 4, 1.8),
+));
+
+const mistletoeFrame = (W, H) => {
+  const sprig = (x, y, s, flipY = 1) => {
+    const leaf = (len, w, ang) => {
+      // reuse the filled leaf outline as a stroke shape, mirrored for the bottom edge
+      const d = almondLeaf(x, y, len * s, w * s, flipY > 0 ? ang : -ang);
+      return d;
+    };
+    return join(leaf(34, 6, 125), leaf(34, 6, 55), leaf(26, 5, 160), leaf(26, 5, 20),
+      circle(x, y + flipY * 4 * s, 4 * s), circle(x - 6 * s, y + flipY * 1.5 * s, 3.2 * s), circle(x + 6 * s, y + flipY * 1.5 * s, 3.2 * s));
+  };
+  return join(
+    doubleRule(W, H),
+    line(W / 2, 22, W / 2, 36), sprig(W / 2, 36, 1.55),           // hanging at the top centre
+    fourCorners(W, H, (P) => {
+      const [a] = [P(34, 34)];
+      const fy = a[1] > H / 2 ? -1 : 1;
+      return join(almondLeaf(a[0], a[1], 40, 7, fy > 0 ? (a[0] < W / 2 ? 20 : 160) : (a[0] < W / 2 ? -20 : -160)),
+        almondLeaf(a[0], a[1], 40, 7, fy > 0 ? (a[0] < W / 2 ? 70 : 110) : (a[0] < W / 2 ? -70 : -110)),
+        circle(a[0], a[1], 5));
+    }),
+  );
+};
+
+// ── GIFT RIBBON ──────────────────────────────────────────────
+/** Bow centred at (cx, cy): two looped wings, a knot and two tails. */
+const bow = (cx, cy, s) => join(
+  `M ${pt([cx, cy])} C ${pt([cx - 13 * s, cy - 10 * s])} ${pt([cx - 13 * s, cy + 8 * s])} ${pt([cx, cy])} Z`,
+  `M ${pt([cx, cy])} C ${pt([cx + 13 * s, cy + 8 * s])} ${pt([cx + 13 * s, cy - 10 * s])} ${pt([cx, cy])} Z`,
+  polygon([[cx - 1, cy], [cx - 6 * s, cy + 9 * s], [cx - 3.6 * s, cy + 9.6 * s], [cx, cy + 1]]),
+  polygon([[cx, cy + 1], [cx + 3.6 * s, cy + 9.6 * s], [cx + 6 * s, cy + 9 * s], [cx + 1, cy]]),
+  circle(cx, cy, 2.2 * s),
+);
+
+const ribbonCorner = mk('0 0 40 40', join(
+  rect(3, 11, 34, 2.2), rect(11, 3, 2.2, 34),    // ribbon bands crossing at the corner
+  bow(12.1, 12.1, 0.8),
+));
+
+const ribbonDivider = mk('0 0 200 20', join(
+  rect(0, 9.2, 84, 1.6), rect(116, 9.2, 84, 1.6),
+  bow(100, 9, 1.05),
+));
+
+const ribbonAccent = mk('0 0 16 16', bow(8, 6.5, 0.55));
+
+const ribbonItemRule = mk('0 0 200 8',
+  // curled-ribbon wave, tightening toward the centre
+  `M 30,4 ${Array.from({ length: 14 }, (_, i) => {
+    const x = 30 + (i + 1) * 10;
+    const amp = 2.6 - Math.abs(i - 6.5) * 0.25;
+    return `Q ${pt([x - 5, i % 2 ? 4 + amp * 2 : 4 - amp * 2])} ${pt([x, 4])}`;
+  }).join(' ')}`, true);
+
+const ribbonFrame = (W, H) => join(
+  doubleRule(W, H),
+  // bow tied at the top centre, tails trailing along the inner rule
+  `M ${pt([W / 2, 22])} C ${pt([W / 2 - 58, 2])} ${pt([W / 2 - 62, 58])} ${pt([W / 2, 22])} Z`,
+  `M ${pt([W / 2, 22])} C ${pt([W / 2 + 62, 58])} ${pt([W / 2 + 58, 2])} ${pt([W / 2, 22])} Z`,
+  circle(W / 2, 22, 7),
+  `M ${pt([W / 2 - 4, 28])} Q ${pt([W / 2 - 18, 56])} ${pt([W / 2 - 44, 70])}`,
+  `M ${pt([W / 2 + 4, 28])} Q ${pt([W / 2 + 18, 56])} ${pt([W / 2 + 44, 70])}`,
+  fourCorners(W, H, (P) => {
+    const [a, b, c] = [P(22, 40), P(40, 40), P(40, 22)];
+    return `M ${pt(a)} L ${pt(b)} L ${pt(c)}`;   // small mitred ribbon fold in each corner
+  }),
+);
+
+// ── GINGERBREAD ICING ────────────────────────────────────────
+/** Piped-icing scallops from p0 to p1, bulging to `side` (+1/-1), with a dot in each. */
+function scallops(p0, p1, r, side = 1, dots = true) {
+  const [x0, y0] = p0, [x1, y1] = p1;
+  const len = Math.hypot(x1 - x0, y1 - y0);
+  const count = Math.max(1, Math.round(len / (2 * r)));
+  const rr = len / (2 * count);
+  const ux = (x1 - x0) / len, uy = (y1 - y0) / len;
+  const nx = -uy * side, ny = ux * side;           // normal toward the bulge
+  let d = `M ${pt(p0)}`;
+  const dotParts = [];
+  for (let i = 1; i <= count; i++) {
+    const ex = x0 + ux * rr * 2 * i, ey = y0 + uy * rr * 2 * i;
+    d += ` A ${n(rr)},${n(rr)} 0 0 ${side > 0 ? 0 : 1} ${pt([ex, ey])}`;
+    if (dots) {
+      const mx = ex - ux * rr + nx * rr * 0.42, my = ey - uy * rr + ny * rr * 0.42;
+      dotParts.push(circle(mx, my, Math.max(0.35, rr * 0.12)));
+    }
+  }
+  return join(d, dotParts);
+}
+
+const icingCorner = mk('0 0 40 40', join(
+  scallops([4, 4], [37, 4], 2.75, 1),
+  scallops([4, 4], [4, 37], 2.75, -1),
+  circle(10, 10, 1.6),
+), true);
+
+const icingDivider = mk('0 0 200 20', join(
+  line(0, 8, 46, 8), line(154, 8, 200, 8),
+  scallops([52, 8], [148, 8], 4.8, 1),
+), true);
+
+const icingAccent = mk('0 0 16 16',
+  // little gingerbread heart with an icing dot
+  join('M 8,13.5 C 1.5,9 2.5,2.5 8,5.8 C 13.5,2.5 14.5,9 8,13.5 Z', circle(8, 8.6, 0.6)), true);
+
+const icingItemRule = mk('0 0 200 8', join(
+  line(20, 2.5, 64, 2.5), line(136, 2.5, 180, 2.5),
+  scallops([68, 2.5], [132, 2.5], 2.6, 1, false),
+  [76, 100, 124].map((x) => circle(x, 6.3, 0.6)),
+), true);
+
+const icingFrame = (W, H) => join(
+  rect(16, 16, W - 32, H - 32),
+  scallops([22, 22], [W - 22, 22], 12, 1),
+  scallops([W - 22, H - 22], [22, H - 22], 12, 1),
+  scallops([22, H - 22], [22, 22], 12, 1),
+  scallops([W - 22, 22], [W - 22, H - 22], 12, 1),
+);
+
 // ── ASSEMBLE ─────────────────────────────────────────────────
 const frames = (fn) => ({
   cartouche: mk('0 0 460 653', fn(460, 653), true),
@@ -297,6 +455,18 @@ export const CHRISTMAS_ORNAMENT_STYLES = {
     corner: starCorner, ...frames(starFrame),
     divider: starDivider, sectionAccent: starAccent, itemRule: starItemRule,
   },
+  mistletoe: {
+    corner: mistletoeCorner, ...frames(mistletoeFrame),
+    divider: mistletoeDivider, sectionAccent: mistletoeAccent, itemRule: mistletoeItemRule,
+  },
+  gift_ribbon: {
+    corner: ribbonCorner, ...frames(ribbonFrame),
+    divider: ribbonDivider, sectionAccent: ribbonAccent, itemRule: ribbonItemRule,
+  },
+  gingerbread: {
+    corner: icingCorner, ...frames(icingFrame),
+    divider: icingDivider, sectionAccent: icingAccent, itemRule: icingItemRule,
+  },
 };
 
 export const CHRISTMAS_ORNAMENT_LABELS = {
@@ -304,6 +474,9 @@ export const CHRISTMAS_ORNAMENT_LABELS = {
   snowflake: 'Snowflake',
   evergreen: 'Evergreen',
   gilded_star: 'Gilded Star',
+  mistletoe: 'Mistletoe',
+  gift_ribbon: 'Gift Ribbon',
+  gingerbread: 'Gingerbread Icing',
 };
 
 // Festive display faces — StylePanel tags these chips with the red .xmas style.
