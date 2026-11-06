@@ -1010,3 +1010,22 @@ textarea::placeholder, input::placeholder { color: var(--bone-faint); font-style
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ── CHRISTMAS ADD-ON — festive red for every Christmas option ──
+   Remove this block (with the christmas addon commit) after the season. */
+:root { --xmas: #e5484d; --xmas-bright: #ff6b6f; }
+.src-label.xmas { color: var(--xmas); }
+.preset-chip.xmas,
+.font-chip.xmas { color: var(--xmas); border-color: color-mix(in srgb, var(--xmas) 45%, transparent); }
+.preset-chip.xmas:hover,
+.font-chip.xmas:hover { color: var(--xmas-bright); border-color: var(--xmas); }
+.preset-chip.xmas:focus-visible,
+.font-chip.xmas:focus-visible { outline-color: var(--xmas); }
+.preset-chip.xmas.active,
+.font-chip.xmas.active {
+  color: var(--xmas-bright); border-color: var(--xmas);
+  background: color-mix(in srgb, var(--xmas) 16%, transparent);
+}
+.src-select.xmas { color: var(--xmas-bright); border-color: var(--xmas); }
+.src-select optgroup.xmas,
+.src-select option.xmas { color: var(--xmas-bright); }

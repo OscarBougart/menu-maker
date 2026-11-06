@@ -786,10 +786,10 @@ export default function App() {
                 onClick={() => setPrompt(prompt === value ? '' : value)} title={value}>{label}</button>
             ))}
           </div>
-          <span className="src-label" style={{ marginTop: 10 }}>Christmas</span>
+          <span className="src-label xmas" style={{ marginTop: 10 }}>Christmas</span>
           <div className="preset-row" role="group" aria-label="Christmas presets">
             {CHRISTMAS_PRESETS.map(({ label, value }) => (
-              <button key={label} type="button" className={'preset-chip' + (prompt === value ? ' active' : '')}
+              <button key={label} type="button" className={'preset-chip xmas' + (prompt === value ? ' active' : '')}
                 aria-pressed={prompt === value}
                 onClick={() => setPrompt(prompt === value ? '' : value)} title={value}>{label}</button>
             ))}

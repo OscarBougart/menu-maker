@@ -1,11 +1,10 @@
 import React from 'react';
-import { CHRISTMAS_ORNAMENT_LABELS } from './ornaments-christmas.js';
+import { CHRISTMAS_ORNAMENT_LABELS, CHRISTMAS_FONTS } from './ornaments-christmas.js';
 
 const DISPLAY_FONTS = [
   'Cormorant Garamond', 'Playfair Display', 'EB Garamond',
   'Cinzel', 'Bodoni Moda', 'DM Serif Display', 'Libre Baskerville',
-  // Christmas / festive display faces
-  'Pinyon Script', 'Great Vibes', 'UnifrakturMaguntia', 'IM Fell English', 'Mountains of Christmas',
+  ...CHRISTMAS_FONTS,
 ];
 const BODY_FONTS = [
   'Archivo Narrow', 'Jost', 'Inter Tight',
@@ -57,7 +56,7 @@ export default function StylePanel({
             <div className="font-grid">
               {DISPLAY_FONTS.map(f => (
                 <button key={f}
-                  className={'font-chip' + ((menu.render_spec?.display_font || 'Cormorant Garamond') === f ? ' active' : '')}
+                  className={'font-chip' + (CHRISTMAS_FONTS.includes(f) ? ' xmas' : '') + ((menu.render_spec?.display_font || 'Cormorant Garamond') === f ? ' active' : '')}
                   aria-pressed={(menu.render_spec?.display_font || 'Cormorant Garamond') === f}
                   style={{ fontFamily: `'${f}', serif` }}
                   onClick={() => onEditMenu(['render_spec', 'display_font'], f)}
@@ -194,7 +193,7 @@ export default function StylePanel({
               >Border frame</button>
             </div>
             <span className="src-label">Style</span>
-            <select className="src-select"
+            <select className={'src-select' + (CHRISTMAS_ORNAMENT_LABELS[ornaments.style] ? ' xmas' : '')}
               value={ornaments.style}
               onChange={(e) => onSetOrnaments(o => ({ ...o, style: e.target.value }))}>
               <option value="none">None</option>
@@ -209,9 +208,9 @@ export default function StylePanel({
               <option value="japanese">Japanese</option>
               <option value="hairline">Hairline</option>
               <option value="bauhaus">Bauhaus</option>
-              <optgroup label="Christmas">
+              <optgroup label="Christmas" className="xmas">
                 {Object.entries(CHRISTMAS_ORNAMENT_LABELS).map(([key, label]) => (
-                  <option key={key} value={key}>{label}</option>
+                  <option key={key} value={key} className="xmas">{label}</option>
                 ))}
               </optgroup>
             </select>

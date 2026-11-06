@@ -305,3 +305,8 @@ export const CHRISTMAS_ORNAMENT_LABELS = {
   evergreen: 'Evergreen',
   gilded_star: 'Gilded Star',
 };
+
+// Festive display faces — StylePanel tags these chips with the red .xmas style.
+export const CHRISTMAS_FONTS = [
+  'Pinyon Script', 'Great Vibes', 'UnifrakturMaguntia', 'IM Fell English', 'Mountains of Christmas',
+];
