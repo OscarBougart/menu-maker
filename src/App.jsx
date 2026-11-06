@@ -5,12 +5,25 @@ import { MENU_DEFAULTS, THEME } from './theme.js';
 import * as store from './storage.js';
 
 // Label a palette object's hexes with their source menu (for seeding the master).
+// Christmas presets: the brief steers the AI's drinks and wording; `look` is
+// applied on top of the generated menu so every Christmas menu reliably comes
+// out in festive reds/greens/golds with a matching font and ornament pack.
 const CHRISTMAS_PRESETS = [
-  { label: 'Victorian Yule', value: 'deep holly green + cranberry + antique gold on cream, 8 cocktails — mulled wine, spiced punch, figgy brandy flips, Dickensian Christmas' },
-  { label: 'Nordic Winter',  value: 'frost white + slate blue + silver, 7 cocktails — aquavit, cardamom, lingonberry, Scandinavian hygge, minimal' },
-  { label: 'Alpine Chalet',  value: 'pine green + walnut + cream, 8 warm cocktails — hot toddies, glühwein, chestnut, après-ski lodge' },
-  { label: 'Midnight Mass',  value: 'midnight navy + candle gold, 6 cocktails — frankincense, myrrh, honey, spiced rum, candlelit and solemn' },
-  { label: "New Year's Eve", value: 'black + champagne gold, 8 cocktails — champagne cocktails, sparkling, gold-flecked, art deco countdown' },
+  { label: 'Victorian Yule',
+    value: 'cranberry red + holly green on warm cream, antique gold touches, 8 cocktails — mulled wine, spiced punch, figgy brandy flips, Dickensian Christmas',
+    look: { background: '#f6eedd', text_primary: '#1f3d2b', text_muted: '#7a5a48', accent: '#b3202c', display_font: 'Pinyon Script', ornament: 'holly' } },
+  { label: 'Nordic Winter',
+    value: 'snow white + Scandinavian red + deep spruce, 7 cocktails — aquavit, cardamom, lingonberry, Nordic knit hygge, minimal',
+    look: { background: '#f8f6f1', text_primary: '#1e3328', text_muted: '#6e7a72', accent: '#c8102e', display_font: 'IM Fell English', ornament: 'snowflake' } },
+  { label: 'Alpine Chalet',
+    value: 'deep chalet red + cream + pine green, 8 warm cocktails — hot toddies, glühwein, chestnut, après-ski lodge by the fire',
+    look: { background: '#7a1620', text_primary: '#f7ecd8', text_muted: '#e0bfa3', accent: '#9fc79a', display_font: 'Mountains of Christmas', ornament: 'evergreen' } },
+  { label: 'Midnight Mass',
+    value: 'deep burgundy + candle gold + cream, 6 cocktails — frankincense, myrrh, honey, spiced rum, candlelit and solemn',
+    look: { background: '#3a0c14', text_primary: '#f5e7c8', text_muted: '#c9a98a', accent: '#d9a441', display_font: 'UnifrakturMaguntia', ornament: 'gilded_star' } },
+  { label: "New Year's Eve",
+    value: 'black + champagne gold + a flash of ruby red, 8 cocktails — champagne cocktails, sparkling, gold-flecked, art deco countdown',
+    look: { background: '#0f0d0e', text_primary: '#f4ead2', text_muted: '#a8977a', accent: '#d4af37', display_font: 'Great Vibes', ornament: 'gilded_star' } },
 ];
 
 function labelPalette(palette, source) {
@@ -255,8 +268,17 @@ export default function App() {
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
+      const xmas = CHRISTMAS_PRESETS.find(p => p.value === prompt);
+      if (xmas) {
+        const { ornament, ...spec } = xmas.look;
+        data.render_spec = { ...data.render_spec, ...spec };
+        setOrnaments(o => ({
+          ...o, style: ornament,
+          placement: { ...o.placement, corners: true, cartouche: true, sections: true, items: true },
+        }));
+      }
       setMenu(data);
-      setStatus('Menu composed');
+      setStatus(xmas ? `Menu composed — ${xmas.label} look applied` : 'Menu composed');
     } catch (err) { setError(err.message); setStatus('Error: ' + err.message); setMenu(prevMenu); }
     finally { setBusy(false); }
   };

@@ -34,7 +34,7 @@ ${fontHint}
 Choose the pairing that best matches the extracted typography character and brief mood.
 Pinyon Script, Great Vibes, UnifrakturMaguntia, IM Fell English and Mountains of Christmas are festive/holiday faces — only pick them when the brief is seasonal (Christmas, winter, New Year's Eve).
 
-SEASONAL BRIEFS: if the brief mentions a holiday or season, let it shape the whole menu — section titles (e.g. "Fireside", "Under the Mistletoe", "Midnight"), the tagline and the front-of-house note should all reflect it, and every drink must be seasonally plausible (warm, spiced, sparkling, wintry ingredients as appropriate). Keep it refined, never kitsch.
+SEASONAL BRIEFS: if the brief mentions a holiday or season, let it shape the whole menu — section titles (e.g. "Fireside", "Under the Mistletoe", "Midnight"), the tagline and the front-of-house note should all reflect it, and every drink must be seasonally plausible (warm, spiced, sparkling, wintry ingredients as appropriate). Keep it refined, never kitsch. For Christmas briefs the render_spec palette must be festive: rich reds (cranberry, holly berry, ruby) as the lead colour, supported by holly/pine green, cream/snow and antique gold — never cool corporate blues or greys.
 
 Return ONLY valid JSON, no markdown. Echo back a final palette/type spec so the renderer can match the reference:
 {
