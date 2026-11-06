@@ -72,6 +72,7 @@ export default function App() {
   const [activeKey, setActiveKey] = useState(null);
   const [clipboard, setClipboard] = useState(null);
   const [zoom, setZoom] = useState(1);
+  const [fitReport, setFitReport] = useState(null);
   const [history, setHistory] = useState([]);
   const [future, setFuture] = useState([]);
   const [extracting, setExtracting] = useState(false);
@@ -921,8 +922,28 @@ export default function App() {
         {menu ? (
           <>
             <div className="zoom-wrapper" style={{ transform: `scale(${zoom})`, transformOrigin: 'top center', transition: 'transform 0.2s' }}>
-              <MenuTemplate menu={menu} format={format} columns={columns} onEdit={editMenu} onDrag={editMenuSilent} onSnapshot={snapshotMenu} onCommit={commitSnapshot} ornaments={ornaments} contentAlign={contentAlign} selectedKeys={selectedKeys} onSelectionChange={setSelectedKeys} activeKey={activeKey} onActiveKeyChange={setActiveKey} zoom={zoom} />
+              <MenuTemplate menu={menu} format={format} columns={columns} onEdit={editMenu} onDrag={editMenuSilent} onSnapshot={snapshotMenu} onCommit={commitSnapshot} ornaments={ornaments} contentAlign={contentAlign} selectedKeys={selectedKeys} onSelectionChange={setSelectedKeys} activeKey={activeKey} onActiveKeyChange={setActiveKey} zoom={zoom} onFitReport={setFitReport} />
             </div>
+            {fitReport?.overflowing > 0 ? (
+              <div className="fit-note fit-note--warn" role="alert">
+                {fitReport.overflowing === 1 ? 'Some drinks don’t fit' : `${fitReport.overflowing} pages don’t fit`} at the smallest readable size —{' '}
+                {fitReport.landscape
+                  ? 'landscape cards hold one page: switch to Booklet ↔, or remove drinks / descriptions.'
+                  : 'turn off descriptions or shorten the text.'}
+              </div>
+            ) : fitReport?.autoColumns ? (
+              <div className="fit-note" role="status">
+                Drinks set in two columns to fit the card.
+              </div>
+            ) : fitReport?.autoPaged ? (
+              <div className="fit-note" role="status">
+                Drinks moved onto extra pages to fit ({fitReport.perPage} per page).
+              </div>
+            ) : fitReport?.shrunk > 0 ? (
+              <div className="fit-note" role="status">
+                Text auto-sized to fit {fitReport.shrunk === 1 ? 'the page' : `${fitReport.shrunk} pages`}.
+              </div>
+            ) : null}
             <div className="edit-hint">Click to select · Drag corners to resize · Drag side bars for width · Double-click text to edit</div>
             <div className="export-bar">
               <button className="export-btn" onClick={saveAsPDF} disabled={busy}>Save as PDF</button>

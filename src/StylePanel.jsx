@@ -12,6 +12,14 @@ const BODY_FONTS = [
   'Barlow Condensed', 'DM Sans', 'Outfit',
 ];
 
+// Content toggles, each with its own font override (falls back to the
+// menu's display/body font when no override is set).
+const CONTENT_FIELDS = [
+  { key: 'show_description', fontKey: 'description_font', label: 'Description', fallback: 'display_font' },
+  { key: 'show_ingredients', fontKey: 'ingredients_font', label: 'Ingredients', fallback: 'body_font' },
+  { key: 'show_prices',      fontKey: 'price_font',       label: 'Prices',      fallback: 'display_font' },
+];
+
 export default function StylePanel({
   menu,
   columns,
@@ -169,19 +177,35 @@ export default function StylePanel({
 
           <div className="block">
             <div className="block-title">Content</div>
-            <div className="style-row content-toggles">
-              {[
-                { key: 'show_description', label: 'Description'  },
-                { key: 'show_ingredients', label: 'Ingredients' },
-                { key: 'show_prices',      label: 'Prices'      },
-              ].map(({ key, label }) => {
+            <div className="content-rows">
+              {CONTENT_FIELDS.map(({ key, fontKey, label, fallback }) => {
                 const on = menu.render_spec?.[key] !== false;
+                const font = menu.render_spec?.[fontKey] || '';
+                const defaultFont = menu.render_spec?.[fallback] || (fallback === 'body_font' ? 'Archivo Narrow' : 'Cormorant Garamond');
+                const fonts = [...DISPLAY_FONTS, ...BODY_FONTS]
+                  .filter(f => CHRISTMAS_SEASON || !CHRISTMAS_FONTS.includes(f) || f === font);
                 return (
-                  <button key={key}
-                    className={'style-chip toggle-chip' + (on ? ' active' : '')}
-                    onClick={() => onEditMenu(['render_spec', key], !on)}
-                    aria-pressed={on}
-                  >{label}</button>
+                  <div className="content-row" key={key}>
+                    <button
+                      className={'style-chip toggle-chip' + (on ? ' active' : '')}
+                      onClick={() => onEditMenu(['render_spec', key], !on)}
+                      aria-pressed={on}
+                    >{label}</button>
+                    <select
+                      className={'src-select content-font' + (CHRISTMAS_FONTS.includes(font) ? ' xmas' : '')}
+                      aria-label={`${label} font`}
+                      value={font}
+                      disabled={!on}
+                      style={{ fontFamily: `'${font || defaultFont}', serif` }}
+                      onChange={(e) => onEditMenu(['render_spec', fontKey], e.target.value || undefined)}
+                    >
+                      <option value="">Default — {defaultFont}</option>
+                      {fonts.map(f => (
+                        <option key={f} value={f} style={{ fontFamily: `'${f}', serif` }}
+                          className={CHRISTMAS_FONTS.includes(f) ? 'xmas' : undefined}>{f}</option>
+                      ))}
+                    </select>
+                  </div>
                 );
               })}
             </div>
