@@ -1,4 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { CHRISTMAS_SEASON } from './season.js';
+import { SOCIAL_FORMATS, composeForSocial, downloadCanvas } from './socialExport.js';
 import MenuTemplate from './MenuTemplate.jsx';
 import StylePanel from './StylePanel.jsx';
 import { MENU_DEFAULTS, THEME } from './theme.js';
@@ -556,6 +558,50 @@ export default function App() {
 
   const exportPDF = () => { setPrintHint(true); window.print(); };
 
+  // ── Shared sheet capture (PDF + Instagram exports) ──
+  const getSheets = (el) => (el.classList.contains('booklet')
+    ? Array.from(el.querySelectorAll('.menu-sheet'))
+    : [el]);
+
+  const captureSheet = async (sheet) => {
+    const { default: html2canvas } = await import('html2canvas');
+    const background = getComputedStyle(sheet).getPropertyValue('--m-bg').trim() || '#1a1a1a';
+    const canvas = await html2canvas(sheet, {
+      scale: 3,
+      useCORS: true,
+      allowTaint: true,
+      logging: false,
+      backgroundColor: background,
+    });
+    return { canvas, background };
+  };
+
+  const saveForInstagram = async (kind) => {
+    const el = document.getElementById('menu-sheet');
+    if (!el) return;
+    const fmt = SOCIAL_FORMATS[kind];
+    setBusy(true);
+    setStatus(`Generating ${fmt.label}…`);
+    try {
+      await document.fonts.ready;
+      const sheets = getSheets(el);
+      const base = (menu?.bar_name || 'menu').replace(/[^a-z0-9]/gi, '-').toLowerCase();
+      // Booklets export one image per page — post them together as a carousel.
+      for (let i = 0; i < sheets.length; i++) {
+        const { canvas, background } = await captureSheet(sheets[i]);
+        const out = composeForSocial(canvas, { width: fmt.width, height: fmt.height, background });
+        const page = sheets.length > 1 ? `-${i + 1}` : '';
+        await downloadCanvas(out, `${base}-instagram-${kind}${page}.png`);
+      }
+      setStatus(`${fmt.label} saved${sheets.length > 1 ? ` (${sheets.length} images)` : ''}`);
+    } catch (err) {
+      setError(err.message);
+      setStatus('Error: ' + err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const saveAsPDF = async () => {
     const el = document.getElementById('menu-sheet');
     if (!el) return;
@@ -565,15 +611,12 @@ export default function App() {
       // Wait for all fonts (Google Fonts) to finish loading before capture
       await document.fonts.ready;
 
-      const { default: html2canvas } = await import('html2canvas');
       const { jsPDF } = await import('jspdf');
 
       const isLandscape = format === 'a5h' || format === 'bookleth' || format === 'a6h';
       const orientation = isLandscape ? 'landscape' : 'portrait';
 
-      const sheets = el.classList.contains('booklet')
-        ? Array.from(el.querySelectorAll('.menu-sheet'))
-        : [el];
+      const sheets = getSheets(el);
 
       const pdfFormat = (format === 'a6' || format === 'a6h') ? 'a6' : 'a5';
       const pdf = new jsPDF({ orientation, unit: 'mm', format: pdfFormat });
@@ -582,14 +625,7 @@ export default function App() {
         const sheet = sheets[i];
         const isA6Sheet = sheet.classList.contains('sheet-a6') || sheet.classList.contains('sheet-a6h');
         const isSheetLandscape = sheet.classList.contains('sheet-a5h') || sheet.classList.contains('sheet-a6h');
-        const bgColor = getComputedStyle(sheet).getPropertyValue('--m-bg').trim() || '#1a1a1a';
-        const canvas = await html2canvas(sheet, {
-          scale: 3,
-          useCORS: true,
-          allowTaint: true,
-          logging: false,
-          backgroundColor: bgColor,
-        });
+        const { canvas } = await captureSheet(sheet);
         const imgData = canvas.toDataURL('image/png');
         if (i > 0) {
           pdf.addPage(isA6Sheet ? 'a6' : 'a5', isSheetLandscape ? 'landscape' : 'portrait');
@@ -808,6 +844,7 @@ export default function App() {
                 onClick={() => setPrompt(prompt === value ? '' : value)} title={value}>{label}</button>
             ))}
           </div>
+          {CHRISTMAS_SEASON && <>
           <span className="src-label xmas" style={{ marginTop: 10 }}>Christmas</span>
           <div className="preset-row" role="group" aria-label="Christmas presets">
             {CHRISTMAS_PRESETS.map(({ label, value }) => (
@@ -816,6 +853,7 @@ export default function App() {
                 onClick={() => setPrompt(prompt === value ? '' : value)} title={value}>{label}</button>
             ))}
           </div>
+          </>}
           <textarea
             aria-label="Drink names"
             rows={3}
@@ -889,6 +927,10 @@ export default function App() {
             <div className="export-bar">
               <button className="export-btn" onClick={saveAsPDF} disabled={busy}>Save as PDF</button>
               <button className="export-btn" onClick={saveMenu}>Save Menu</button>
+              <button className="export-btn" onClick={() => saveForInstagram('post')} disabled={busy}
+                title="1080 × 1350 PNG for the Instagram feed">Insta Post</button>
+              <button className="export-btn" onClick={() => saveForInstagram('story')} disabled={busy}
+                title="1080 × 1920 PNG for Instagram stories">Insta Story</button>
             </div>
             {printHint && (
               <div className="print-hint" role="note">

@@ -1,5 +1,6 @@
 import React from 'react';
 import { CHRISTMAS_ORNAMENT_LABELS, CHRISTMAS_FONTS } from './ornaments-christmas.js';
+import { CHRISTMAS_SEASON } from './season.js';
 
 const DISPLAY_FONTS = [
   'Cormorant Garamond', 'Playfair Display', 'EB Garamond',
@@ -54,7 +55,10 @@ export default function StylePanel({
             <div className="block-title">Fonts</div>
             <span className="src-label">Display</span>
             <div className="font-grid">
-              {DISPLAY_FONTS.map(f => (
+              {DISPLAY_FONTS
+                // Out of season, hide Christmas faces unless this menu already uses one.
+                .filter(f => CHRISTMAS_SEASON || !CHRISTMAS_FONTS.includes(f) || menu.render_spec?.display_font === f)
+                .map(f => (
                 <button key={f}
                   className={'font-chip' + (CHRISTMAS_FONTS.includes(f) ? ' xmas' : '') + ((menu.render_spec?.display_font || 'Cormorant Garamond') === f ? ' active' : '')}
                   aria-pressed={(menu.render_spec?.display_font || 'Cormorant Garamond') === f}
@@ -208,11 +212,13 @@ export default function StylePanel({
               <option value="japanese">Japanese</option>
               <option value="hairline">Hairline</option>
               <option value="bauhaus">Bauhaus</option>
+              {(CHRISTMAS_SEASON || CHRISTMAS_ORNAMENT_LABELS[ornaments.style]) && (
               <optgroup label="Christmas" className="xmas">
                 {Object.entries(CHRISTMAS_ORNAMENT_LABELS).map(([key, label]) => (
                   <option key={key} value={key} className="xmas">{label}</option>
                 ))}
               </optgroup>
+              )}
             </select>
             {ornaments.style !== 'none' && (
               <>
