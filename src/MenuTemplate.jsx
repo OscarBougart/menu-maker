@@ -1,7 +1,8 @@
-import React, { useRef, useState, useCallback, useEffect } from 'react';
+import React, { useRef, useState, useCallback, useEffect, useLayoutEffect } from 'react';
 import ReactDOM from 'react-dom';
 import { MENU_DEFAULTS } from './theme.js';
 import { ORNAMENT_STYLES } from './ornaments.js';
+import { fitSheets } from './autoFit.js';
 
 function SnapGuidesOverlay({ guides }) {
   if (!guides || (guides.v == null && guides.h == null)) return null;
@@ -199,12 +200,17 @@ function FloatingToolbar({ activeKey, menu, onEdit, zoom }) {
 }
 
 
-function groupBlocks(blocks) {
+function groupBlocks(blocks, sections = []) {
   const groups = [];
   blocks.forEach((b) => {
     if (b.kind === 'section') {
       groups.push({ section: b.section, si: b.si, cocktails: [] });
-    } else if (groups.length > 0) {
+    } else {
+      // A page that starts mid-section continues that section (without
+      // repeating its title). Previously these drinks were silently dropped.
+      if (groups.length === 0) {
+        groups.push({ section: sections[b.si], si: b.si, cocktails: [], continued: true });
+      }
       groups[groups.length - 1].cocktails.push(b);
     }
   });
@@ -500,8 +506,10 @@ function Editable({ className, value, onSave, multiline = false, style, role, 'a
   const ref = useRef(null);
   const editingRef = useRef(false);  // tracks state without causing re-renders
 
-  // Sync prop → DOM only when not editing (editing keeps user's typed content)
-  useEffect(() => {
+  // Sync prop → DOM only when not editing (editing keeps user's typed content).
+  // Layout effect, not effect: the text must be in place before paint and
+  // before MenuTemplate's auto-fit measures the page (child effects run first).
+  useLayoutEffect(() => {
     if (!editingRef.current && ref.current) {
       ref.current.innerText = value ?? '';
     }
@@ -637,7 +645,7 @@ const ItemTopRule = React.memo(function ItemTopRule({ pack, show }) {
   return <OrnSvg pack={pack} slot="itemRule" className="ornament-item-rule" />;
 });
 
-export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit, onDrag, onSnapshot, onCommit, ornaments = { style: 'none', placement: {} }, contentAlign = 'center', selectedKeys: selectedKeysProp, onSelectionChange, activeKey: activeKeyProp, onActiveKeyChange, zoom = 1 }) {
+export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit, onDrag, onSnapshot, onCommit, ornaments = { style: 'none', placement: {} }, contentAlign = 'center', selectedKeys: selectedKeysProp, onSelectionChange, activeKey: activeKeyProp, onActiveKeyChange, zoom = 1, onFitReport }) {
   if (!menu) return null;
 
   // ── Selection state ────────────────────────────────────────────────────────
@@ -691,14 +699,32 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
 
   const spec = menu.render_spec || {};
 
-  const N = Math.max(1, spec.items_per_page || 7);
+  // Drinks per page. `autoN` lowers it automatically when a page can't fit
+  // even at the smallest readable text size, so drinks flow onto another
+  // page instead of being clipped. It resets whenever the content changes.
+  const [autoN, setAutoN] = useState(null);
+  const [autoCols, setAutoCols] = useState(null); // landscape cards: 2 drink columns when 1 overflows
+  const contentKey = `${format}|${columns}|${JSON.stringify({ ...menu, _layout: undefined })}`;
+  const [autoNKey, setAutoNKey] = useState(contentKey);
+  if (autoNKey !== contentKey) {
+    // React's "adjust state when a prop changes" pattern (state, not a ref,
+    // so it survives StrictMode's double render).
+    setAutoNKey(contentKey);
+    setAutoN(null);
+    setAutoCols(null);
+  }
+  const userN = Math.max(1, spec.items_per_page || 7);
+  const N = (autoNKey === contentKey ? autoN : null) ?? userN;
+  const PAGINATED_FORMATS = ['a5', 'a6', 'booklet', 'bookleth'];
+  const isLandscapeCard = format === 'a5h' || format === 'a6h';
+  const drinkColumns = (autoNKey === contentKey && autoCols) || columns;
   const ITEM_H_BASE = 81;
   const titleScale = spec.title_scale || 1;
   const COVER_H = 113 + (titleScale * 42);
   const CONTENT_H = {
     a5:       653 - 100 - COVER_H,
     a5h:      460 - 80,
-    a6:       327 - 50 - COVER_H,
+    a6:       (653 - 100 - COVER_H) / 2, // A6 = half-size A5 (was using the full A5 cover height)
     a6h:      230 - 40,
     booklet:  653 - 100,
     bookleth: 460 - 100,
@@ -707,6 +733,7 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
   const finalItemScale         = availableH           / (N * ITEM_H_BASE);
   const finalItemScaleBooklet  = CONTENT_H.booklet    / (N * ITEM_H_BASE);
   const finalItemScaleBookletH = CONTENT_H.bookleth   / (N * ITEM_H_BASE);
+  const finalItemScaleA6Rest   = finalItemScaleBooklet * 0.5; // A6 continuation pages
   const BOOKLET_ITEMS_PER_PAGE   = N;
   const BOOKLET_H_ITEMS_PER_PAGE = N;
 
@@ -717,8 +744,11 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
     '--m-accent':      spec.accent       || MENU_DEFAULTS.accent,
     '--m-display':     `'${spec.display_font || 'Cormorant Garamond'}'`,
     '--m-body':        `'${spec.body_font    || 'Archivo Narrow'}'`,
-    '--m-pad-v':       '50px',
-    '--m-pad-h':       '46px',
+    '--m-desc-font':   spec.description_font ? `'${spec.description_font}'` : undefined,
+    '--m-ing-font':    spec.ingredients_font ? `'${spec.ingredients_font}'` : undefined,
+    '--m-price-font':  spec.price_font       ? `'${spec.price_font}'`       : undefined,
+    '--m-pad-v':       format === 'a6' ? '24px' : '50px',
+    '--m-pad-h':       format === 'a6' ? '22px' : '46px',
     '--m-section-gap': '16px',
     '--m-title-size':  `${(spec.title_scale || 1) * 42}px`,
     '--m-title-scale': `${spec.title_scale || 1}`,
@@ -727,6 +757,47 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
     '--m-content-align': contentAlign === 'right' ? 'right' : contentAlign === 'left' ? 'left' : 'center',
     '--m-content-justify': contentAlign === 'right' ? 'flex-end' : contentAlign === 'left' ? 'flex-start' : 'center',
   };
+
+  // ── Auto-fit: shrink text per page so nothing is clipped (see autoFit.js) ──
+  const lastFitReport = useRef('');
+  const runFit = useRef(null);
+  runFit.current = () => {
+    const root = document.getElementById('menu-sheet');
+    const canPaginate = PAGINATED_FORMATS.includes(format) && N > 2;
+    // Paginated formats: keep text ≥ 80% of the chosen size and move drinks to
+    // a new page instead. Otherwise (or once pages can't help) allow shrinking
+    // down to the readable minimum.
+    // Base item scale grows as N drops (∝ 1/N), so express the 80% floor
+    // relative to the size the user chose (userN), not the current base.
+    const fit = fitSheets(root, format, { floor: canPaginate ? 0.8 * N / userN : 0 });
+    if (fit.overflowing > 0 && canPaginate) {
+      setAutoN(N - 1); // re-renders before paint; fit runs again on the new pages
+      return;
+    }
+    if (fit.overflowing > 0 && isLandscapeCard && drinkColumns < 2) {
+      setAutoCols(2);
+      return;
+    }
+    const report = {
+      ...fit,
+      autoPaged: autoN !== null && N < userN, perPage: N,
+      autoColumns: drinkColumns > columns,
+      landscape: isLandscapeCard,
+    };
+    const key = JSON.stringify(report);
+    if (key !== lastFitReport.current) {
+      lastFitReport.current = key;
+      onFitReport && onFitReport(report);
+    }
+  };
+  useLayoutEffect(() => { runFit.current(); });
+  useEffect(() => {
+    // Web fonts change text metrics after they load — re-fit when they do.
+    const refit = () => runFit.current && runFit.current();
+    document.fonts?.addEventListener?.('loadingdone', refit);
+    document.fonts?.ready.then(refit);
+    return () => document.fonts?.removeEventListener?.('loadingdone', refit);
+  }, []);
 
   const showIngredients = spec.show_ingredients !== false;
   const showPrices      = spec.show_prices      !== false;
@@ -1071,13 +1142,13 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
 
   const SectionList = ({ blocks }) => {
     const rows = blocks
-      ? groupBlocks(blocks)
+      ? groupBlocks(blocks, sections)
       : sections.map((section, si) => ({ section, si, cocktails: (section.cocktails || []).map((c, ci) => ({ c, si, ci })) }));
     return (
-      <div className="m-columns" style={{ columnCount: columns, columnGap: '32px' }}>
+      <div className="m-columns" style={{ columnCount: drinkColumns, columnGap: drinkColumns > columns && format === 'a6h' ? '16px' : '32px' }}>
         {rows.map((g, gi) => (
           <div key={gi}>
-            <SectionTitle section={g.section} si={g.si} />
+            {!g.continued && <SectionTitle section={g.section} si={g.si} />}
             {g.cocktails.map((b, bi) => (
               <Cocktail key={bi} c={b.c} si={b.si} ci={b.ci} />
             ))}
@@ -1259,7 +1330,7 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
           </div>
           {restPages.map((page, pi) => (
             <div key={pi} className={`menu-sheet sheet-a6${noBorder ? ' no-border' : ''}`}
-                 style={{ '--m-item-scale': finalItemScaleBooklet }}>
+                 style={{ '--m-item-scale': finalItemScaleA6Rest }}>
               {pl.allPages && pack && <CornerSet pack={pack} />}
               <div className="menu-pad">
                 <SectionList blocks={page.blocks} />

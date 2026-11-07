@@ -15,7 +15,7 @@ export default async function handler(req, res) {
     const prompt = `You are a senior brand & menu designer. Study this cocktail/bar menu image and reverse-engineer its complete design system so it can be reused as a template.
 
 AVAILABLE FONTS — you must only recommend fonts from these two lists:
-Display (headings, drink names): Cormorant Garamond, Playfair Display, EB Garamond, Cinzel, Bodoni Moda, DM Serif Display, Libre Baskerville
+Display (headings, drink names): Cormorant Garamond, Playfair Display, EB Garamond, Cinzel, Bodoni Moda, DM Serif Display, Libre Baskerville, Pinyon Script, Great Vibes, UnifrakturMaguntia, IM Fell English, Mountains of Christmas
 Body (ingredients, labels): Archivo Narrow, Inter Tight, Jost, Barlow Condensed, DM Sans, Outfit
 
 Return ONLY valid JSON, no markdown:

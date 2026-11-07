@@ -1,12 +1,23 @@
 import React from 'react';
+import { CHRISTMAS_ORNAMENT_LABELS, CHRISTMAS_FONTS } from './ornaments-christmas.js';
+import { CHRISTMAS_SEASON } from './season.js';
 
 const DISPLAY_FONTS = [
   'Cormorant Garamond', 'Playfair Display', 'EB Garamond',
   'Cinzel', 'Bodoni Moda', 'DM Serif Display', 'Libre Baskerville',
+  ...CHRISTMAS_FONTS,
 ];
 const BODY_FONTS = [
   'Archivo Narrow', 'Jost', 'Inter Tight',
   'Barlow Condensed', 'DM Sans', 'Outfit',
+];
+
+// Content toggles, each with its own font override (falls back to the
+// menu's display/body font when no override is set).
+const CONTENT_FIELDS = [
+  { key: 'show_description', fontKey: 'description_font', label: 'Description', fallback: 'display_font' },
+  { key: 'show_ingredients', fontKey: 'ingredients_font', label: 'Ingredients', fallback: 'body_font' },
+  { key: 'show_prices',      fontKey: 'price_font',       label: 'Prices',      fallback: 'display_font' },
 ];
 
 export default function StylePanel({
@@ -52,9 +63,12 @@ export default function StylePanel({
             <div className="block-title">Fonts</div>
             <span className="src-label">Display</span>
             <div className="font-grid">
-              {DISPLAY_FONTS.map(f => (
+              {DISPLAY_FONTS
+                // Out of season, hide Christmas faces unless this menu already uses one.
+                .filter(f => CHRISTMAS_SEASON || !CHRISTMAS_FONTS.includes(f) || menu.render_spec?.display_font === f)
+                .map(f => (
                 <button key={f}
-                  className={'font-chip' + ((menu.render_spec?.display_font || 'Cormorant Garamond') === f ? ' active' : '')}
+                  className={'font-chip' + (CHRISTMAS_FONTS.includes(f) ? ' xmas' : '') + ((menu.render_spec?.display_font || 'Cormorant Garamond') === f ? ' active' : '')}
                   aria-pressed={(menu.render_spec?.display_font || 'Cormorant Garamond') === f}
                   style={{ fontFamily: `'${f}', serif` }}
                   onClick={() => onEditMenu(['render_spec', 'display_font'], f)}
@@ -163,19 +177,35 @@ export default function StylePanel({
 
           <div className="block">
             <div className="block-title">Content</div>
-            <div className="style-row content-toggles">
-              {[
-                { key: 'show_description', label: 'Description'  },
-                { key: 'show_ingredients', label: 'Ingredients' },
-                { key: 'show_prices',      label: 'Prices'      },
-              ].map(({ key, label }) => {
+            <div className="content-rows">
+              {CONTENT_FIELDS.map(({ key, fontKey, label, fallback }) => {
                 const on = menu.render_spec?.[key] !== false;
+                const font = menu.render_spec?.[fontKey] || '';
+                const defaultFont = menu.render_spec?.[fallback] || (fallback === 'body_font' ? 'Archivo Narrow' : 'Cormorant Garamond');
+                const fonts = [...DISPLAY_FONTS, ...BODY_FONTS]
+                  .filter(f => CHRISTMAS_SEASON || !CHRISTMAS_FONTS.includes(f) || f === font);
                 return (
-                  <button key={key}
-                    className={'style-chip toggle-chip' + (on ? ' active' : '')}
-                    onClick={() => onEditMenu(['render_spec', key], !on)}
-                    aria-pressed={on}
-                  >{label}</button>
+                  <div className="content-row" key={key}>
+                    <button
+                      className={'style-chip toggle-chip' + (on ? ' active' : '')}
+                      onClick={() => onEditMenu(['render_spec', key], !on)}
+                      aria-pressed={on}
+                    >{label}</button>
+                    <select
+                      className={'src-select content-font' + (CHRISTMAS_FONTS.includes(font) ? ' xmas' : '')}
+                      aria-label={`${label} font`}
+                      value={font}
+                      disabled={!on}
+                      style={{ fontFamily: `'${font || defaultFont}', serif` }}
+                      onChange={(e) => onEditMenu(['render_spec', fontKey], e.target.value || undefined)}
+                    >
+                      <option value="">Default — {defaultFont}</option>
+                      {fonts.map(f => (
+                        <option key={f} value={f} style={{ fontFamily: `'${f}', serif` }}
+                          className={CHRISTMAS_FONTS.includes(f) ? 'xmas' : undefined}>{f}</option>
+                      ))}
+                    </select>
+                  </div>
                 );
               })}
             </div>
@@ -191,7 +221,7 @@ export default function StylePanel({
               >Border frame</button>
             </div>
             <span className="src-label">Style</span>
-            <select className="src-select"
+            <select className={'src-select' + (CHRISTMAS_ORNAMENT_LABELS[ornaments.style] ? ' xmas' : '')}
               value={ornaments.style}
               onChange={(e) => onSetOrnaments(o => ({ ...o, style: e.target.value }))}>
               <option value="none">None</option>
@@ -206,6 +236,13 @@ export default function StylePanel({
               <option value="japanese">Japanese</option>
               <option value="hairline">Hairline</option>
               <option value="bauhaus">Bauhaus</option>
+              {(CHRISTMAS_SEASON || CHRISTMAS_ORNAMENT_LABELS[ornaments.style]) && (
+              <optgroup label="Christmas" className="xmas">
+                {Object.entries(CHRISTMAS_ORNAMENT_LABELS).map(([key, label]) => (
+                  <option key={key} value={key} className="xmas">{label}</option>
+                ))}
+              </optgroup>
+              )}
             </select>
             {ornaments.style !== 'none' && (
               <>

@@ -1,10 +1,33 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { CHRISTMAS_SEASON } from './season.js';
+import { SOCIAL_FORMATS, composeForSocial, downloadCanvas } from './socialExport.js';
 import MenuTemplate from './MenuTemplate.jsx';
 import StylePanel from './StylePanel.jsx';
 import { MENU_DEFAULTS, THEME } from './theme.js';
 import * as store from './storage.js';
 
 // Label a palette object's hexes with their source menu (for seeding the master).
+// Christmas presets: the brief steers the AI's drinks and wording; `look` is
+// applied on top of the generated menu so every Christmas menu reliably comes
+// out in festive reds/greens/golds with a matching font and ornament pack.
+const CHRISTMAS_PRESETS = [
+  { label: 'Victorian Yule',
+    value: 'cranberry red + holly green on warm cream, antique gold touches, 8 cocktails — mulled wine, spiced punch, figgy brandy flips, Dickensian Christmas',
+    look: { background: '#f6eedd', text_primary: '#1f3d2b', text_muted: '#7a5a48', accent: '#b3202c', display_font: 'Pinyon Script', ornament: 'holly' } },
+  { label: 'Nordic Winter',
+    value: 'snow white + Scandinavian red + deep spruce, 7 cocktails — aquavit, cardamom, lingonberry, Nordic knit hygge, minimal',
+    look: { background: '#f8f6f1', text_primary: '#1e3328', text_muted: '#6e7a72', accent: '#c8102e', display_font: 'IM Fell English', ornament: 'snowflake' } },
+  { label: 'Alpine Chalet',
+    value: 'deep chalet red + cream + pine green, 8 warm cocktails — hot toddies, glühwein, chestnut, après-ski lodge by the fire',
+    look: { background: '#7a1620', text_primary: '#f7ecd8', text_muted: '#e0bfa3', accent: '#9fc79a', display_font: 'Mountains of Christmas', ornament: 'evergreen' } },
+  { label: 'Midnight Mass',
+    value: 'deep burgundy + candle gold + cream, 6 cocktails — frankincense, myrrh, honey, spiced rum, candlelit and solemn',
+    look: { background: '#3a0c14', text_primary: '#f5e7c8', text_muted: '#c9a98a', accent: '#d9a441', display_font: 'UnifrakturMaguntia', ornament: 'gilded_star' } },
+  { label: "New Year's Eve",
+    value: 'black + champagne gold + a flash of ruby red, 8 cocktails — champagne cocktails, sparkling, gold-flecked, art deco countdown',
+    look: { background: '#0f0d0e', text_primary: '#f4ead2', text_muted: '#a8977a', accent: '#d4af37', display_font: 'Great Vibes', ornament: 'gilded_star' } },
+];
+
 function labelPalette(palette, source) {
   if (!palette) return [];
   return Object.entries(palette)
@@ -49,6 +72,7 @@ export default function App() {
   const [activeKey, setActiveKey] = useState(null);
   const [clipboard, setClipboard] = useState(null);
   const [zoom, setZoom] = useState(1);
+  const [fitReport, setFitReport] = useState(null);
   const [history, setHistory] = useState([]);
   const [future, setFuture] = useState([]);
   const [extracting, setExtracting] = useState(false);
@@ -247,8 +271,17 @@ export default function App() {
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
+      const xmas = CHRISTMAS_PRESETS.find(p => p.value === prompt);
+      if (xmas) {
+        const { ornament, ...spec } = xmas.look;
+        data.render_spec = { ...data.render_spec, ...spec };
+        setOrnaments(o => ({
+          ...o, style: ornament,
+          placement: { ...o.placement, corners: true, cartouche: true, sections: true, items: true },
+        }));
+      }
       setMenu(data);
-      setStatus('Menu composed');
+      setStatus(xmas ? `Menu composed — ${xmas.label} look applied` : 'Menu composed');
     } catch (err) { setError(err.message); setStatus('Error: ' + err.message); setMenu(prevMenu); }
     finally { setBusy(false); }
   };
@@ -526,6 +559,50 @@ export default function App() {
 
   const exportPDF = () => { setPrintHint(true); window.print(); };
 
+  // ── Shared sheet capture (PDF + Instagram exports) ──
+  const getSheets = (el) => (el.classList.contains('booklet')
+    ? Array.from(el.querySelectorAll('.menu-sheet'))
+    : [el]);
+
+  const captureSheet = async (sheet) => {
+    const { default: html2canvas } = await import('html2canvas');
+    const background = getComputedStyle(sheet).getPropertyValue('--m-bg').trim() || '#1a1a1a';
+    const canvas = await html2canvas(sheet, {
+      scale: 3,
+      useCORS: true,
+      allowTaint: true,
+      logging: false,
+      backgroundColor: background,
+    });
+    return { canvas, background };
+  };
+
+  const saveForInstagram = async (kind) => {
+    const el = document.getElementById('menu-sheet');
+    if (!el) return;
+    const fmt = SOCIAL_FORMATS[kind];
+    setBusy(true);
+    setStatus(`Generating ${fmt.label}…`);
+    try {
+      await document.fonts.ready;
+      const sheets = getSheets(el);
+      const base = (menu?.bar_name || 'menu').replace(/[^a-z0-9]/gi, '-').toLowerCase();
+      // Booklets export one image per page — post them together as a carousel.
+      for (let i = 0; i < sheets.length; i++) {
+        const { canvas, background } = await captureSheet(sheets[i]);
+        const out = composeForSocial(canvas, { width: fmt.width, height: fmt.height, background });
+        const page = sheets.length > 1 ? `-${i + 1}` : '';
+        await downloadCanvas(out, `${base}-instagram-${kind}${page}.png`);
+      }
+      setStatus(`${fmt.label} saved${sheets.length > 1 ? ` (${sheets.length} images)` : ''}`);
+    } catch (err) {
+      setError(err.message);
+      setStatus('Error: ' + err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const saveAsPDF = async () => {
     const el = document.getElementById('menu-sheet');
     if (!el) return;
@@ -535,15 +612,12 @@ export default function App() {
       // Wait for all fonts (Google Fonts) to finish loading before capture
       await document.fonts.ready;
 
-      const { default: html2canvas } = await import('html2canvas');
       const { jsPDF } = await import('jspdf');
 
       const isLandscape = format === 'a5h' || format === 'bookleth' || format === 'a6h';
       const orientation = isLandscape ? 'landscape' : 'portrait';
 
-      const sheets = el.classList.contains('booklet')
-        ? Array.from(el.querySelectorAll('.menu-sheet'))
-        : [el];
+      const sheets = getSheets(el);
 
       const pdfFormat = (format === 'a6' || format === 'a6h') ? 'a6' : 'a5';
       const pdf = new jsPDF({ orientation, unit: 'mm', format: pdfFormat });
@@ -552,14 +626,7 @@ export default function App() {
         const sheet = sheets[i];
         const isA6Sheet = sheet.classList.contains('sheet-a6') || sheet.classList.contains('sheet-a6h');
         const isSheetLandscape = sheet.classList.contains('sheet-a5h') || sheet.classList.contains('sheet-a6h');
-        const bgColor = getComputedStyle(sheet).getPropertyValue('--m-bg').trim() || '#1a1a1a';
-        const canvas = await html2canvas(sheet, {
-          scale: 3,
-          useCORS: true,
-          allowTaint: true,
-          logging: false,
-          backgroundColor: bgColor,
-        });
+        const { canvas } = await captureSheet(sheet);
         const imgData = canvas.toDataURL('image/png');
         if (i > 0) {
           pdf.addPage(isA6Sheet ? 'a6' : 'a5', isSheetLandscape ? 'landscape' : 'portrait');
@@ -778,6 +845,16 @@ export default function App() {
                 onClick={() => setPrompt(prompt === value ? '' : value)} title={value}>{label}</button>
             ))}
           </div>
+          {CHRISTMAS_SEASON && <>
+          <span className="src-label xmas" style={{ marginTop: 10 }}>Christmas</span>
+          <div className="preset-row" role="group" aria-label="Christmas presets">
+            {CHRISTMAS_PRESETS.map(({ label, value }) => (
+              <button key={label} type="button" className={'preset-chip xmas' + (prompt === value ? ' active' : '')}
+                aria-pressed={prompt === value}
+                onClick={() => setPrompt(prompt === value ? '' : value)} title={value}>{label}</button>
+            ))}
+          </div>
+          </>}
           <textarea
             aria-label="Drink names"
             rows={3}
@@ -845,12 +922,36 @@ export default function App() {
         {menu ? (
           <>
             <div className="zoom-wrapper" style={{ transform: `scale(${zoom})`, transformOrigin: 'top center', transition: 'transform 0.2s' }}>
-              <MenuTemplate menu={menu} format={format} columns={columns} onEdit={editMenu} onDrag={editMenuSilent} onSnapshot={snapshotMenu} onCommit={commitSnapshot} ornaments={ornaments} contentAlign={contentAlign} selectedKeys={selectedKeys} onSelectionChange={setSelectedKeys} activeKey={activeKey} onActiveKeyChange={setActiveKey} zoom={zoom} />
+              <MenuTemplate menu={menu} format={format} columns={columns} onEdit={editMenu} onDrag={editMenuSilent} onSnapshot={snapshotMenu} onCommit={commitSnapshot} ornaments={ornaments} contentAlign={contentAlign} selectedKeys={selectedKeys} onSelectionChange={setSelectedKeys} activeKey={activeKey} onActiveKeyChange={setActiveKey} zoom={zoom} onFitReport={setFitReport} />
             </div>
+            {fitReport?.overflowing > 0 ? (
+              <div className="fit-note fit-note--warn" role="alert">
+                {fitReport.overflowing === 1 ? 'Some drinks don’t fit' : `${fitReport.overflowing} pages don’t fit`} at the smallest readable size —{' '}
+                {fitReport.landscape
+                  ? 'landscape cards hold one page: switch to Booklet ↔, or remove drinks / descriptions.'
+                  : 'turn off descriptions or shorten the text.'}
+              </div>
+            ) : fitReport?.autoColumns ? (
+              <div className="fit-note" role="status">
+                Drinks set in two columns to fit the card.
+              </div>
+            ) : fitReport?.autoPaged ? (
+              <div className="fit-note" role="status">
+                Drinks moved onto extra pages to fit ({fitReport.perPage} per page).
+              </div>
+            ) : fitReport?.shrunk > 0 ? (
+              <div className="fit-note" role="status">
+                Text auto-sized to fit {fitReport.shrunk === 1 ? 'the page' : `${fitReport.shrunk} pages`}.
+              </div>
+            ) : null}
             <div className="edit-hint">Click to select · Drag corners to resize · Drag side bars for width · Double-click text to edit</div>
             <div className="export-bar">
               <button className="export-btn" onClick={saveAsPDF} disabled={busy}>Save as PDF</button>
               <button className="export-btn" onClick={saveMenu}>Save Menu</button>
+              <button className="export-btn" onClick={() => saveForInstagram('post')} disabled={busy}
+                title="1080 × 1350 PNG for the Instagram feed">Insta Post</button>
+              <button className="export-btn" onClick={() => saveForInstagram('story')} disabled={busy}
+                title="1080 × 1920 PNG for Instagram stories">Insta Story</button>
             </div>
             {printHint && (
               <div className="print-hint" role="note">

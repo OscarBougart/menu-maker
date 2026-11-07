@@ -2,6 +2,8 @@
 // strokeOnly=true → rendered with fill="none" stroke="currentColor"
 // default        → rendered with fill="currentColor"
 
+import { CHRISTMAS_ORNAMENT_STYLES } from './ornaments-christmas.js';
+
 const mk = (viewBox, path, strokeOnly = false) => ({ viewBox, path, strokeOnly });
 
 // ── CORNERS (top-left, 40×40 — CSS mirrors for other three) ─────────────────
@@ -281,5 +283,5 @@ export const ORNAMENT_STYLES = Object.fromEntries(
     divider:       DIVIDERS[k],
     sectionAccent: SECTION_ACCENTS[k],
     itemRule:      ITEM_RULES[k],
-  }])
+  }]).concat(Object.entries(CHRISTMAS_ORNAMENT_STYLES))
 );
