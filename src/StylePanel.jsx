@@ -1,6 +1,7 @@
 import React from 'react';
 import { CHRISTMAS_ORNAMENT_LABELS, CHRISTMAS_FONTS } from './ornaments-christmas.js';
 import { CHRISTMAS_SEASON } from './season.js';
+import { itemPx, ITEM_PX } from './autoFit.js';
 
 const DISPLAY_FONTS = [
   'Cormorant Garamond', 'Playfair Display', 'EB Garamond',
@@ -15,10 +16,44 @@ const BODY_FONTS = [
 // Content toggles, each with its own font override (falls back to the
 // menu's display/body font when no override is set).
 const CONTENT_FIELDS = [
-  { key: 'show_description', fontKey: 'description_font', label: 'Description', fallback: 'display_font' },
-  { key: 'show_ingredients', fontKey: 'ingredients_font', label: 'Ingredients', fallback: 'body_font' },
-  { key: 'show_prices',      fontKey: 'price_font',       label: 'Prices',      fallback: 'display_font' },
+  { key: 'show_description', fontKey: 'description_font', boldKey: 'description_bold', label: 'Description', fallback: 'display_font' },
+  { key: 'show_ingredients', fontKey: 'ingredients_font', boldKey: 'ingredients_bold', label: 'Ingredients', fallback: 'body_font' },
+  { key: 'show_prices',      fontKey: 'price_font',       boldKey: 'price_bold',       label: 'Prices',      fallback: 'display_font' },
 ];
+
+// Faces with no bold weight — the browser would fake it by smearing the
+// letters, so the Bold button is disabled while one of these is in use.
+const NO_BOLD_FONTS = ['Pinyon Script', 'Great Vibes', 'UnifrakturMaguntia', 'IM Fell English', 'DM Serif Display'];
+
+function BoldButton({ label, font, on, onToggle }) {
+  const unsupported = NO_BOLD_FONTS.includes(font);
+  return (
+    <button
+      className={'style-chip bold-chip' + (on && !unsupported ? ' active' : '')}
+      aria-pressed={on && !unsupported}
+      aria-label={`Bold ${label.toLowerCase()}`}
+      title={unsupported ? `${font} has no bold version` : `Bold ${label.toLowerCase()}`}
+      disabled={unsupported}
+      onClick={onToggle}
+    >B</button>
+  );
+}
+
+// Count / clear every `hidden: true` flag in the layout tree (deleted titles,
+// cover pieces and blocks hidden from the floating toolbar).
+function countHidden(node) {
+  if (!node || typeof node !== 'object') return 0;
+  let n = node.hidden === true ? 1 : 0;
+  for (const v of Object.values(node)) n += countHidden(v);
+  return n;
+}
+function unhideAll(node) {
+  if (Array.isArray(node)) return node.map(unhideAll);
+  if (!node || typeof node !== 'object') return node;
+  const out = {};
+  for (const [k, v] of Object.entries(node)) if (!(k === 'hidden' && v === true)) out[k] = unhideAll(v);
+  return out;
+}
 
 export default function StylePanel({
   menu,
@@ -75,16 +110,49 @@ export default function StylePanel({
                 >{f}</button>
               ))}
             </div>
-            <span className="src-label">Body</span>
-            <div className="font-grid">
-              {BODY_FONTS.map(f => (
-                <button key={f}
-                  className={'font-chip' + ((menu.render_spec?.body_font || 'Archivo Narrow') === f ? ' active' : '')}
-                  aria-pressed={(menu.render_spec?.body_font || 'Archivo Narrow') === f}
-                  style={{ fontFamily: `'${f}', sans-serif` }}
-                  onClick={() => onEditMenu(['render_spec', 'body_font'], f)}
-                >{f}</button>
-              ))}
+            <span className="src-label">Content</span>
+            <div className="content-rows">
+              <div className="content-row">
+                <span className="content-label">Cocktail names</span>
+                <span className="content-label" style={{ textTransform: 'none', letterSpacing: 0 }}>Display font</span>
+                <BoldButton label="Cocktail names"
+                  font={menu.render_spec?.display_font || 'Cormorant Garamond'}
+                  on={!!menu.render_spec?.name_bold}
+                  onToggle={() => onEditMenu(['render_spec', 'name_bold'], !menu.render_spec?.name_bold)} />
+              </div>
+              {CONTENT_FIELDS.map(({ key, fontKey, boldKey, label, fallback }) => {
+                const on = menu.render_spec?.[key] !== false;
+                const font = menu.render_spec?.[fontKey] || '';
+                const defaultFont = menu.render_spec?.[fallback] || (fallback === 'body_font' ? 'Archivo Narrow' : 'Cormorant Garamond');
+                const fonts = [...DISPLAY_FONTS, ...BODY_FONTS]
+                  .filter(f => CHRISTMAS_SEASON || !CHRISTMAS_FONTS.includes(f) || f === font);
+                return (
+                  <div className="content-row" key={key}>
+                    <button
+                      className={'style-chip toggle-chip' + (on ? ' active' : '')}
+                      onClick={() => onEditMenu(['render_spec', key], !on)}
+                      aria-pressed={on}
+                    >{label}</button>
+                    <select
+                      className={'src-select content-font' + (CHRISTMAS_FONTS.includes(font) ? ' xmas' : '')}
+                      aria-label={`${label} font`}
+                      value={font}
+                      disabled={!on}
+                      style={{ fontFamily: `'${font || defaultFont}', serif` }}
+                      onChange={(e) => onEditMenu(['render_spec', fontKey], e.target.value || undefined)}
+                    >
+                      <option value="">Default — {defaultFont}</option>
+                      {fonts.map(f => (
+                        <option key={f} value={f} style={{ fontFamily: `'${f}', serif` }}
+                          className={CHRISTMAS_FONTS.includes(f) ? 'xmas' : undefined}>{f}</option>
+                      ))}
+                    </select>
+                    <BoldButton label={label} font={font || defaultFont}
+                      on={!!menu.render_spec?.[boldKey]}
+                      onToggle={() => onEditMenu(['render_spec', boldKey], !menu.render_spec?.[boldKey])} />
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -126,11 +194,13 @@ export default function StylePanel({
                 <span className="src-label">Cocktails</span>
                 <div className="style-row">
                   <button className="style-chip"
-                    onClick={() => onEditMenu(['render_spec', 'items_per_page'], Math.min(20, (menu.render_spec?.items_per_page || 7) + 1))}
+                    disabled={itemPx(menu.render_spec) <= ITEM_PX.min}
+                    onClick={() => onEditMenu(['render_spec', 'item_px'], Math.max(ITEM_PX.min, itemPx(menu.render_spec) - 1))}
                     aria-label="Smaller cocktails">−</button>
-                  <span className="per-page-num">{Math.round(19 * 553 / ((menu.render_spec?.items_per_page || 7) * 81))}px</span>
+                  <span className="per-page-num">{itemPx(menu.render_spec)}px</span>
                   <button className="style-chip"
-                    onClick={() => onEditMenu(['render_spec', 'items_per_page'], Math.max(3, (menu.render_spec?.items_per_page || 7) - 1))}
+                    disabled={itemPx(menu.render_spec) >= ITEM_PX.max}
+                    onClick={() => onEditMenu(['render_spec', 'item_px'], Math.min(ITEM_PX.max, itemPx(menu.render_spec) + 1))}
                     aria-label="Larger cocktails">+</button>
                 </div>
               </div>
@@ -147,6 +217,12 @@ export default function StylePanel({
                   aria-label="Looser spacing">+</button>
               </div>
             </div>
+            {countHidden(menu._layout) > 0 && (
+              <button className="style-chip" style={{ marginTop: 12, width: '100%' }}
+                onClick={() => onEditMenu(['_layout'], unhideAll(menu._layout))}>
+                Show {countHidden(menu._layout)} hidden element{countHidden(menu._layout) === 1 ? '' : 's'}
+              </button>
+            )}
           </div>
 
           {(() => {
@@ -174,42 +250,6 @@ export default function StylePanel({
               </div>
             );
           })()}
-
-          <div className="block">
-            <div className="block-title">Content</div>
-            <div className="content-rows">
-              {CONTENT_FIELDS.map(({ key, fontKey, label, fallback }) => {
-                const on = menu.render_spec?.[key] !== false;
-                const font = menu.render_spec?.[fontKey] || '';
-                const defaultFont = menu.render_spec?.[fallback] || (fallback === 'body_font' ? 'Archivo Narrow' : 'Cormorant Garamond');
-                const fonts = [...DISPLAY_FONTS, ...BODY_FONTS]
-                  .filter(f => CHRISTMAS_SEASON || !CHRISTMAS_FONTS.includes(f) || f === font);
-                return (
-                  <div className="content-row" key={key}>
-                    <button
-                      className={'style-chip toggle-chip' + (on ? ' active' : '')}
-                      onClick={() => onEditMenu(['render_spec', key], !on)}
-                      aria-pressed={on}
-                    >{label}</button>
-                    <select
-                      className={'src-select content-font' + (CHRISTMAS_FONTS.includes(font) ? ' xmas' : '')}
-                      aria-label={`${label} font`}
-                      value={font}
-                      disabled={!on}
-                      style={{ fontFamily: `'${font || defaultFont}', serif` }}
-                      onChange={(e) => onEditMenu(['render_spec', fontKey], e.target.value || undefined)}
-                    >
-                      <option value="">Default — {defaultFont}</option>
-                      {fonts.map(f => (
-                        <option key={f} value={f} style={{ fontFamily: `'${f}', serif` }}
-                          className={CHRISTMAS_FONTS.includes(f) ? 'xmas' : undefined}>{f}</option>
-                      ))}
-                    </select>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
 
           <div className="block">
             <div className="block-title">Ornaments</div>

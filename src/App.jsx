@@ -171,7 +171,7 @@ export default function App() {
     };
     document.addEventListener('keydown', handleKey);
     return () => document.removeEventListener('keydown', handleKey);
-  }, [history, future, menu, activeKey, clipboard]);
+  }, [history, future, menu, activeKey, selectedKeys, clipboard]);
 
   /* 1. Upload + extract */
   const onPickFile = (e) => loadImageFile(e.target.files?.[0]);
@@ -362,54 +362,59 @@ export default function App() {
     });
   };
 
-  // Remove element by key. Returns true if removed.
+  // Delete the selected element(s). Each element is removed on its own:
+  // deleting a section title only hides that title — its drinks stay.
+  // With several elements selected, all of them are deleted in one undo step.
   const deleteElement = (key) => {
-    if (!key) return;
-    if (readPath(menu, parseKey(key))?.locked) return;
-    // Cocktails: _layout.sections.<si>.cocktails.<ci>
-    let m = key.match(/^_layout\.sections\.(\d+)\.cocktails\.(\d+)$/);
-    if (m) {
-      const si = +m[1], ci = +m[2];
-      mutateWithHistory(next => {
+    if (!key || !menu) return;
+    const keys = (selectedKeys.size > 1 && selectedKeys.has(key) ? Array.from(selectedKeys) : [key])
+      .filter(k => !readPath(menu, parseKey(k))?.locked);
+    if (!keys.length) return;
+
+    // Set `hidden` on a layout node, creating the path if needed.
+    const hide = (next, path) => {
+      let node = next;
+      for (let i = 0; i < path.length; i++) {
+        if (node[path[i]] == null) node[path[i]] = typeof path[i + 1] === 'number' ? [] : {};
+        node = node[path[i]];
+      }
+      node.hidden = true;
+    };
+
+    const cocktails = [];
+    const headers = [];
+    const others = [];
+    for (const k of keys) {
+      let m = k.match(/^_layout\.sections\.(\d+)\.cocktails\.(\d+)$/);
+      if (m) { cocktails.push([+m[1], +m[2]]); continue; }
+      m = k.match(/^_layout\.sections\.(\d+)\.header$/);
+      if (m) { headers.push(+m[1]); continue; }
+      if (/^_layout\.(cover\.(kicker|title|tagline|divider)|footer)$/.test(k)) others.push(k);
+    }
+
+    mutateWithHistory(next => {
+      // Cover pieces and footer: hide (their text is kept, so undo is exact).
+      for (const k of others) hide(next, parseKey(k));
+      // Section titles: hide just the title.
+      for (const si of headers) hide(next, ['_layout', 'sections', si, 'header']);
+      // Drinks: remove highest index first so earlier indices stay valid.
+      cocktails.sort((a, b) => b[0] - a[0] || b[1] - a[1]);
+      for (const [si, ci] of cocktails) {
         next.sections?.[si]?.cocktails?.splice(ci, 1);
         next._layout?.sections?.[si]?.cocktails?.splice(ci, 1);
-      });
-      setActiveKey(null);
-      setSelectedKeys(new Set());
-      return;
-    }
-    // Section header: _layout.sections.<si>.header → remove whole section
-    m = key.match(/^_layout\.sections\.(\d+)\.header$/);
-    if (m) {
-      const si = +m[1];
-      mutateWithHistory(next => {
-        next.sections?.splice(si, 1);
-        next._layout?.sections?.splice(si, 1);
-      });
-      setActiveKey(null);
-      setSelectedKeys(new Set());
-      return;
-    }
-    // Cover sub-blocks and footer — clear text content + reset layout
-    m = key.match(/^_layout\.cover\.(kicker|title|tagline|divider)$/);
-    if (m) {
-      const sub = m[1];
-      mutateWithHistory(next => {
-        if (next._layout?.cover) next._layout.cover[sub] = { x: 0, y: 0, scale: 1 };
-        if (sub === 'title') next.bar_name = '';
-        if (sub === 'tagline') next.tagline = '';
-      });
-      setActiveKey(null);
-      return;
-    }
-    if (key === '_layout.footer') {
-      mutateWithHistory(next => {
-        next.note = '';
-        if (next._layout) next._layout.footer = { x: 0, y: 0, scale: 1 };
-      });
-      setActiveKey(null);
-      return;
-    }
+      }
+      // A section left with no title and no drinks is removed entirely.
+      for (let si = (next.sections?.length || 0) - 1; si >= 0; si--) {
+        const empty = !(next.sections[si].cocktails?.length);
+        const titleHidden = !!next._layout?.sections?.[si]?.header?.hidden;
+        if (empty && titleHidden) {
+          next.sections.splice(si, 1);
+          next._layout?.sections?.splice(si, 1);
+        }
+      }
+    });
+    setActiveKey(null);
+    setSelectedKeys(new Set());
   };
 
   // Copy: stash element data + layout under its key into clipboard state

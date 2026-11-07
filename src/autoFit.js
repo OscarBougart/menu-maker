@@ -8,6 +8,27 @@
 // readable minimum. Sheets that still overflow at the minimum are reported so
 // the editor can warn the user instead of clipping silently.
 
+// Cocktail-name size the user picks in the Style panel, in px on a full A5
+// page. Older menus stored a drinks-per-page count instead (items_per_page).
+export const ITEM_PX = { min: 10, max: 40 };
+const FULL_PAGE_H = 553;   // booklet page content height (MenuTemplate CONTENT_H.booklet)
+const ITEM_H_BASE = 81;    // height of one drink block at scale 1
+
+export function itemPx(spec = {}) {
+  if (spec.item_px) return spec.item_px;
+  // Older menus: the drink count set a nominal size that auto-fit then
+  // trimmed to ~80% in practice, so start from what was actually rendered
+  // (7 per page → 15px) and existing menus keep their look.
+  const n = Math.max(1, spec.items_per_page || 7);
+  const px = Math.round(0.8 * BASE_NAME_PX * FULL_PAGE_H / (n * ITEM_H_BASE));
+  return Math.min(ITEM_PX.max, Math.max(ITEM_PX.min, px));
+}
+
+/** Equivalent drinks-per-full-page for the chosen size (not an integer). */
+export function itemSizeN(spec = {}) {
+  return (BASE_NAME_PX * FULL_PAGE_H) / (itemPx(spec) * ITEM_H_BASE);
+}
+
 const MEASURED = '.m-title, .m-tagline, .m-section, .m-item, .m-footer';
 const BOTTOM_MARGIN = 0.045;  // keep content clear of the bottom edge / frame
 const BASE_NAME_PX = 19;      // .m-name font-size at scale 1 (styles.css)

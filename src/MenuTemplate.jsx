@@ -2,7 +2,7 @@ import React, { useRef, useState, useCallback, useEffect, useLayoutEffect } from
 import ReactDOM from 'react-dom';
 import { MENU_DEFAULTS } from './theme.js';
 import { ORNAMENT_STYLES } from './ornaments.js';
-import { fitSheets } from './autoFit.js';
+import { fitSheets, itemSizeN } from './autoFit.js';
 
 function SnapGuidesOverlay({ guides }) {
   if (!guides || (guides.v == null && guides.h == null)) return null;
@@ -713,7 +713,13 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
     setAutoN(null);
     setAutoCols(null);
   }
-  const userN = Math.max(1, spec.items_per_page || 7);
+  // Cocktail text size is chosen directly in px (spec.item_px). `sizeN` is the
+  // equivalent "drinks per full page" at that size; it sets the text scale and
+  // never changes. `N` is how many drinks go on a page — it starts at what
+  // fits nominally and drops (adding pages) if they don't fit, so the chosen
+  // size is kept instead of being shrunk back.
+  const sizeN = itemSizeN(spec);
+  const userN = Math.max(1, Math.floor(sizeN + 1e-6));
   const N = (autoNKey === contentKey ? autoN : null) ?? userN;
   const PAGINATED_FORMATS = ['a5', 'a6', 'booklet', 'bookleth'];
   const isLandscapeCard = format === 'a5h' || format === 'a6h';
@@ -730,9 +736,13 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
     bookleth: 460 - 100,
   };
   const availableH = CONTENT_H[format] ?? CONTENT_H.booklet;
-  const finalItemScale         = availableH           / (N * ITEM_H_BASE);
-  const finalItemScaleBooklet  = CONTENT_H.booklet    / (N * ITEM_H_BASE);
-  const finalItemScaleBookletH = CONTENT_H.bookleth   / (N * ITEM_H_BASE);
+  // Paginated A5/A6: drinks render at the chosen px on every page (A6 at half,
+  // as it is a half-size sheet); the cover page just holds fewer drinks.
+  // Single landscape cards keep sizing relative to their own height.
+  const pageScaleH = format === 'a5' ? CONTENT_H.booklet : format === 'a6' ? CONTENT_H.booklet / 2 : availableH;
+  const finalItemScale         = pageScaleH           / (sizeN * ITEM_H_BASE);
+  const finalItemScaleBooklet  = CONTENT_H.booklet    / (sizeN * ITEM_H_BASE);
+  const finalItemScaleBookletH = CONTENT_H.bookleth   / (sizeN * ITEM_H_BASE);
   const finalItemScaleA6Rest   = finalItemScaleBooklet * 0.5; // A6 continuation pages
   const BOOKLET_ITEMS_PER_PAGE   = N;
   const BOOKLET_H_ITEMS_PER_PAGE = N;
@@ -747,6 +757,10 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
     '--m-desc-font':   spec.description_font ? `'${spec.description_font}'` : undefined,
     '--m-ing-font':    spec.ingredients_font ? `'${spec.ingredients_font}'` : undefined,
     '--m-price-font':  spec.price_font       ? `'${spec.price_font}'`       : undefined,
+    '--m-name-weight':  spec.name_bold        ? 700 : undefined,
+    '--m-desc-weight':  spec.description_bold ? 700 : undefined,
+    '--m-ing-weight':   spec.ingredients_bold ? 700 : undefined,
+    '--m-price-weight': spec.price_bold       ? 700 : undefined,
     '--m-pad-v':       format === 'a6' ? '24px' : '50px',
     '--m-pad-h':       format === 'a6' ? '22px' : '46px',
     '--m-section-gap': '16px',
@@ -763,13 +777,11 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
   const runFit = useRef(null);
   runFit.current = () => {
     const root = document.getElementById('menu-sheet');
-    const canPaginate = PAGINATED_FORMATS.includes(format) && N > 2;
-    // Paginated formats: keep text ≥ 80% of the chosen size and move drinks to
-    // a new page instead. Otherwise (or once pages can't help) allow shrinking
-    // down to the readable minimum.
-    // Base item scale grows as N drops (∝ 1/N), so express the 80% floor
-    // relative to the size the user chose (userN), not the current base.
-    const fit = fitSheets(root, format, { floor: canPaginate ? 0.8 * N / userN : 0 });
+    const canPaginate = PAGINATED_FORMATS.includes(format) && N > 1;
+    // Paginated formats: keep text at ≥ 95% of the chosen size and move drinks
+    // to a new page instead. Otherwise (or once pages can't help) allow
+    // shrinking down to the readable minimum.
+    const fit = fitSheets(root, format, { floor: canPaginate ? 0.95 : 0 });
     if (fit.overflowing > 0 && canPaginate) {
       setAutoN(N - 1); // re-renders before paint; fit runs again on the new pages
       return;
@@ -1170,7 +1182,7 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
           <div
             className={`menu-sheet sheet-a5${pl.cartouche && pack ? ' has-cartouche' : ''}${noBorder ? ' no-border' : ''}`}
             id="menu-sheet"
-            style={styleVars}
+            style={styleVars} data-align={contentAlign}
             onClick={handleCanvasClick}
           >
             {pl.corners && pack && <CornerSet pack={pack} />}
@@ -1211,7 +1223,7 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
     return (
       <>
         {overlays}
-        <div className="booklet" id="menu-sheet" style={styleVars} onClick={handleCanvasClick}>
+        <div className="booklet" id="menu-sheet" style={styleVars} data-align={contentAlign} onClick={handleCanvasClick}>
           <div className={`menu-sheet sheet-a5${pl.cartouche && pack ? ' has-cartouche' : ''}${noBorder ? ' no-border' : ''}`}>
             {pl.corners && pack && <CornerSet pack={pack} />}
             <CartoucheFrame pack={pack} format={format} show={pl.cartouche} />
@@ -1248,7 +1260,7 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
     return (
       <>
         {overlays}
-        <div className={`menu-sheet sheet-a5h${pl.cartouche && pack ? ' has-cartouche' : ''}${noBorder ? ' no-border' : ''}`} id="menu-sheet" style={styleVars} onClick={handleCanvasClick}>
+        <div className={`menu-sheet sheet-a5h${pl.cartouche && pack ? ' has-cartouche' : ''}${noBorder ? ' no-border' : ''}`} id="menu-sheet" style={styleVars} data-align={contentAlign} onClick={handleCanvasClick}>
           {pl.corners && pack && <CornerSet pack={pack} />}
           <CartoucheFrame pack={pack} format={format} show={pl.cartouche} />
           <div className="menu-pad-h">
@@ -1278,7 +1290,7 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
           <div
             className={`menu-sheet sheet-a6${pl.cartouche && pack ? ' has-cartouche' : ''}${noBorder ? ' no-border' : ''}`}
             id="menu-sheet"
-            style={styleVars}
+            style={styleVars} data-align={contentAlign}
             onClick={handleCanvasClick}
           >
             {pl.corners && pack && <CornerSet pack={pack} />}
@@ -1319,7 +1331,7 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
     return (
       <>
         {overlays}
-        <div className="booklet" id="menu-sheet" style={styleVars} onClick={handleCanvasClick}>
+        <div className="booklet" id="menu-sheet" style={styleVars} data-align={contentAlign} onClick={handleCanvasClick}>
           <div className={`menu-sheet sheet-a6${pl.cartouche && pack ? ' has-cartouche' : ''}${noBorder ? ' no-border' : ''}`}>
             {pl.corners && pack && <CornerSet pack={pack} />}
             <CartoucheFrame pack={pack} format={format} show={pl.cartouche} />
@@ -1356,7 +1368,7 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
     return (
       <>
         {overlays}
-        <div className={`menu-sheet sheet-a6h${pl.cartouche && pack ? ' has-cartouche' : ''}${noBorder ? ' no-border' : ''}`} id="menu-sheet" style={styleVars} onClick={handleCanvasClick}>
+        <div className={`menu-sheet sheet-a6h${pl.cartouche && pack ? ' has-cartouche' : ''}${noBorder ? ' no-border' : ''}`} id="menu-sheet" style={styleVars} data-align={contentAlign} onClick={handleCanvasClick}>
           {pl.corners && pack && <CornerSet pack={pack} />}
           <CartoucheFrame pack={pack} format={format} show={pl.cartouche} />
           <div className="menu-pad-h">
@@ -1402,7 +1414,7 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
     return (
       <>
         {overlays}
-        <div className="booklet" id="menu-sheet" style={styleVars} onClick={handleCanvasClick}>
+        <div className="booklet" id="menu-sheet" style={styleVars} data-align={contentAlign} onClick={handleCanvasClick}>
         {hPages.map((page, pi) => {
           if (page.type === 'cover') {
             return (
@@ -1468,7 +1480,7 @@ export default function MenuTemplate({ menu, format = 'a5', columns = 1, onEdit,
   return (
     <>
       {overlays}
-      <div className="booklet" id="menu-sheet" style={styleVars} onClick={handleCanvasClick}>
+      <div className="booklet" id="menu-sheet" style={styleVars} data-align={contentAlign} onClick={handleCanvasClick}>
       {pages.map((page, pi) => {
         if (page.type === 'cover') {
           return (
