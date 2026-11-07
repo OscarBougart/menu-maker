@@ -1,13 +1,13 @@
 // season.js — decides when seasonal (Christmas) options are shown.
 //
-// Christmas options appear automatically from 15 November to 6 January
+// Christmas options appear automatically from 1 November to 6 January
 // (Epiphany) and hide themselves the rest of the year — no code revert needed.
 //
 // Override for testing / previews via the URL:
 //   ?season=christmas  → always show Christmas options
 //   ?season=off        → always hide them
 
-export const CHRISTMAS_START = { month: 11, day: 15 }; // 15 Nov
+export const CHRISTMAS_START = { month: 11, day: 1 };  // 1 Nov
 export const CHRISTMAS_END = { month: 1, day: 6 };     // 6 Jan
 
 export function isChristmasSeason(now = new Date()) {
